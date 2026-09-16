@@ -776,21 +776,3 @@ def track3_status_pie(units_df: pd.DataFrame, *, online_minutes: int) -> go.Figu
     )
     fig.update_layout(**_pie_layout(f"Track3 units reporting (Online = message ≤ {online_minutes} min)"))
     return fig
-
-
-def track3_age_histogram(units_df: pd.DataFrame) -> go.Figure:
-    if units_df is None or units_df.empty or "AgeMinutes" not in units_df.columns:
-        return EMPTY_FIG
-    ages = pd.to_numeric(units_df["AgeMinutes"], errors="coerce").dropna()
-    if ages.empty:
-        return EMPTY_FIG
-    hours = (ages / 60.0).clip(upper=48)
-    fig = px.histogram(x=hours, nbins=24, color_discrete_sequence=[BRAND_PRIMARY])
-    fig.update_layout(
-        **_bar_layout(
-            "Time since last Track3 message (hours, capped at 48)",
-            x_title="Hours since last message",
-            y_title="Units",
-        )
-    )
-    return fig

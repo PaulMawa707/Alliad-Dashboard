@@ -1831,7 +1831,6 @@ def track3_context(*, statuses: list[str] | None = None) -> dict[str, Any]:
 
     charts = [
         figure_html(C.track3_status_pie(df, online_minutes=online_limit), div_id="track3-status"),
-        figure_html(C.track3_age_histogram(df), div_id="track3-age"),
     ]
     show_cols = [c for c in TRACK3_TABLE_COLUMNS if c in filtered.columns]
     return {
