@@ -1,0 +1,17 @@
+.env
+.env.local
+.env.vercel.*
+.vss_token.txt
+.vss_token.json
+accounts.json
+postman/MiX_API.postman_environment.json
+postman/VSS_API.postman_environment.json
+scripts/mix_get_token.ps1
+.dhl_devices_snapshot.csv
+.mix_asset_catalog.csv
+alliad_server.log
+*.log
+.tmp-mix-client/
+.venv/
+__pycache__/
+*.pyc

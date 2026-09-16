@@ -1,0 +1,24 @@
+{
+  "builds": [
+    {
+      "src": "flask_app.py",
+      "use": "@vercel/python",
+      "config": {
+        "maxLambdaSize": "50mb",
+        "maxDuration": 300
+      }
+    }
+  ],
+  "routes": [
+    {
+      "src": "/(.*)",
+      "dest": "flask_app.py"
+    }
+  ],
+  "crons": [
+    {
+      "path": "/api/cron/realtime",
+      "schedule": "*/15 * * * *"
+    }
+  ]
+}

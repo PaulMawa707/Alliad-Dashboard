@@ -1,0 +1,23 @@
+<header class="topbar">
+  <div class="topbar-left">
+    <button type="button" id="sidebar-toggle" class="sidebar-toggle" aria-expanded="true" aria-label="Collapse sidebar" aria-controls="app-sidebar">
+      <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 6h16M4 12h16M4 18h16" stroke-width="2" stroke-linecap="round"/></svg>
+    </button>
+    <a href="{{ url_for('dashboard_overview') }}" class="topbar-logo">
+      <img src="{{ url_for('static', filename='controltech_logo.png') }}" alt="ControlTech">
+    </a>
+    <div class="topbar-wordmark">{{ brand_name }} <span>{{ brand_tagline }}</span></div>
+    <div class="topbar-divider"></div>
+    <div class="topbar-subtitle">{{ brand_subtitle }}</div>
+  </div>
+  <div class="topbar-right">
+    <div id="topbar-clock" class="topbar-clock"></div>
+    <div id="auto-refresh-status" class="auto-refresh-status"{% if last_auto_refresh_display %} title="Last auto-refresh {{ last_auto_refresh_display.at_display }} (EAT)"{% endif %}>
+      <span class="auto-refresh-label">Auto-refresh</span>
+      <span id="auto-refresh-at">{% if last_auto_refresh_display %}{{ last_auto_refresh_display.at_display }}{% else %}Waiting for first run{% endif %}</span>
+    </div>
+    <div class="live-pill"><span class="live-dot"></span> Live</div>
+    <button type="button" id="btn-refresh" class="btn-accent">Refresh data</button>
+    <button type="button" id="btn-signout" class="btn-logout">Sign out</button>
+  </div>
+</header>

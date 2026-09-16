@@ -1,0 +1,67 @@
+// 是否开启token验证
+var enableTokenVerification = false;
+// ajax
+function ajax({ type, url, data, success }) {
+  let xhr = new XMLHttpRequest();
+  xhr.onreadystatechange = function () {
+      if (xhr.readyState === 4 && xhr.status === 200) {
+          let res = JSON.parse(xhr.responseText);
+          // res 是服务器返回的结果
+          if( res.status === 10000 ) success(res);
+          if( res.status === 10023 ) success(res);
+          else success(null);
+      } 
+  }
+  // 需要把传递进来的对象，转成字符串格式
+  let arr = [];
+  for (let key in data) {
+      // key 表示键：id | appkey | bookname
+      // data[key] 表示值： 1 | laotang | zs
+      arr.push(key + ':' + data[key]);  // 'id=1'
+  }
+  let str = arr.join('&');
+
+  // 判断是什么请求方式
+  if (type === 'GET') {
+      xhr.open(type, url + '?' + str);
+      xhr.send();
+  } else if (type === 'POST') {
+      xhr.open(type, url);
+      xhr.setRequestHeader('Content-Type', 'application/json');
+      xhr.send(data);
+  }
+
+}
+function getGtOfDevice(){
+  var promise = new Promise(function(resolve,reject){
+      var option = {
+          'deviceNo': getUrlParam("deviceId")
+      }
+      ajax({
+          type: 'POST',
+          url: '/vss/vehicle/queryGtOfDevice.action',
+          data: JSON.stringify(option),
+          success: function (res) {
+              resolve(res)
+          }
+      });
+  })
+  return promise;
+}
+
+function getVerifyLegitimacy() {
+    var promise = new Promise(function(resolve,reject){
+        var option = {
+            'token': getUrlParam("token")
+        }
+        ajax({
+            type: 'POST',
+            url: '/vss/vehicle/findUnregistered.action',
+            data: JSON.stringify(option),
+            success: function (res) {
+                resolve(res)
+            }
+        });
+    })
+    return promise;
+}

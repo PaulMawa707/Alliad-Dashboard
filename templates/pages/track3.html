@@ -1,0 +1,33 @@
+{% extends 'layout.html' %}
+{% from 'partials/macros.html' import kpi_row, page_header %}
+{% from 'partials/filters.html' import filter_panel, filter_multi, filter_submit %}
+
+{% block content %}
+{{ page_header(title, subtitle) }}
+
+{% if notice %}
+  <div class="banner banner-warn" role="status">{{ notice }}</div>
+{% endif %}
+
+{% if enabled %}
+  {% call filter_panel() %}
+    {{ filter_multi('status', 'Reporting status', status_opts, statuses) }}
+    {{ filter_submit() }}
+  {% endcall %}
+
+  {{ kpi_row(kpis) }}
+
+  {% if charts %}
+    <div class="chart-grid">
+      {% for chart in charts %}
+        <div class="chart-card">{{ chart|safe }}</div>
+      {% endfor %}
+    </div>
+  {% endif %}
+
+  <div class="table-card">
+    <h3 class="table-title">Track3 units</h3>
+    {{ table_html|safe }}
+  </div>
+{% endif %}
+{% endblock %}

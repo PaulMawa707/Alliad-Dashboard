@@ -1,0 +1,1089 @@
+<html>
+
+<head>
+    <meta name="viewport"
+        content="width=device-width,initial-scale=1,minimum-scale=1,maximum-scale=1,user-scalable=no" />
+
+
+    <link href="font/iconfont.css?v=1.8.6" rel="stylesheet" type="text/css">
+    </link>
+    <link href="real_time.css?v=1.8.6" rel="stylesheet">
+    </link>
+
+
+    <script src="../js/screenfull.js?v=1.8.6"></script>
+    <script src="jquery-3.5.1.min.js?v=1.8.6"></script>
+    <script src="flv.js?v=1.8.6"></script>
+    <script src="common.js?v=1.8.6"></script>
+    <script type="text/javascript" src="../dist/player/player.js?v=1.8.6"></script>
+    <script type="text/javascript" src="../dist/player/common.js?v=1.8.6"></script>
+    <script type="text/javascript" src="../dist/player/webgl.js?v=1.8.6"></script>
+    <script type="text/javascript" src="../dist/player/pcm-player.js?v=1.8.6"></script>
+    <script type="text/javascript" src="../dist/player/HWMediaPlayer.js?v=1.8.6"></script>
+    <script type="text/javascript" src="../dist/player/HWRecorder.js?v=1.8.6"></script>
+    <script src="../js/howen_video_player.js?v=1.8.6"></script>
+    <script type="text/javascript">
+        //page url: ?token=abcdefg&deviceId=99990001&chs=1_3&stream=0	//stream:0-sub 1-main  // intercom：1 开启通道对讲 其他或无或http 不开启
+        //real vide url: http://172.16.50.210:33122/live?1591212324_99990001_1_0
+        var gUICnfPanelDisplay = true; // display windows controll panel
+        var gUICnfWinodwsNum = 0; // windows nummode
+
+        var gParaServerIp = self.location.host;
+        var gParaServerPort = 33122;
+        var gToken = "";
+        var gPlayNum = 0; // default 
+        var gPlayArray = new Array(); // jsPlay handle array.  start from 1 ,same as  window num
+        var gPlayChs = new Array(); //channle info.   obj{"deviceId": ,"ch": }  start from 0
+        var gPlayMode = new Array();
+        var gDeviceId = "";
+        var gUserName = "admin";
+        var gStream = 0;
+        var gWincount = 4;
+        var protocolStr = document.location.protocol;
+        var gBufferMs = 2000;
+        var gEnableVerification = true;
+        if (protocolStr.indexOf("https") != -1) gParaServerPort = 9987; // https 443
+
+
+        flvjs.LoggingControl.addLogListener(function (type, str) {
+            //if(str.indexOf("IOException")!=-1 && str.indexOf("Fetch stream meet Early-EOF")!=-1  )
+            //	alert(str);
+        });
+
+
+        //get para from url
+        function getUrlParam(name) {
+            var reg = new RegExp("(^|&)" + name + "=([^&]*)(&|$)");
+            //alert(window.location.search.substr(1));
+            var r = window.location.search.substr(1).match(reg);
+            if (r != null) return unescape(r[2]);
+            return null;
+        }
+
+        // 是否使用启用通道对讲功能
+        var hasIntercom = (protocolStr.indexOf("https") != -1) && getUrlParam("intercom") == "1";
+
+        async function initEnvParas() {
+            // 通过 设备id 查询设备所属 节点服务器地址
+            await getGtOfDevice().then(res => {
+                if (res && res.data.nodeID != '0') gParaServerIp = res.data.gtAddress;
+            });
+
+            let _spitPos = gParaServerIp.indexOf(":");
+            if (_spitPos != -1) {
+                gParaServerIp = gParaServerIp.substring(0, _spitPos);
+
+            }
+
+            gDeviceId = getUrlParam("deviceId");
+            gUserName = getUrlParam("username") ? getUrlParam("username") : "admin";
+            gToken = getUrlParam("token");
+            gStream = parseInt(getUrlParam("stream"));
+            let _chs = getUrlParam("chs");
+            if (_chs != null) {
+                let _charr = _chs.split("_");
+                for (i = 0; i < _charr.length; i++) {
+                    gPlayChs[i] = {
+                        'deviceId': gDeviceId,
+                        'ch': _charr[i]
+                    };
+                }
+
+                gPlayNum = gPlayChs.length;
+            }
+
+            if (getUrlParam("wnum") != null && parseInt(getUrlParam("wnum")) > 0)
+                gUICnfWinodwsNum = parseInt(getUrlParam("wnum"));
+            if (getUrlParam("panel") != null && parseInt(getUrlParam("panel")) == 0)
+                gUICnfPanelDisplay = false;
+
+            if (getUrlParam("buffer") != null)
+                gBufferMs = parseInt(getUrlParam("buffer"));
+
+            let baseWinNum = gPlayChs.length;
+            if (gUICnfWinodwsNum > 0 && gUICnfWinodwsNum > baseWinNum) baseWinNum = gUICnfWinodwsNum;
+
+            if (baseWinNum > 9) gWincount = 16;
+            else if (baseWinNum > 6) gWincount = 9;
+            else if (baseWinNum > 4) gWincount = 6;
+            else if (baseWinNum > 2) gWincount = 4;
+            else if (baseWinNum > 1) gWincount = 2;
+            else gWincount = 1;
+            $(".tv_video").data("wincount", gWincount); // set window count
+
+        }
+
+        function PlayControlStop(index) //by window no.
+        {
+            if (gPlayArray[index] == null) return;
+            let _player = gPlayArray[index];
+
+            if (_player.initSocketWorker == "undefined") {
+                _player.pause();
+                _player.unload();
+                _player.detachMediaElement();
+                _player.destroy();
+
+                let videoElement = document.getElementById('videoElement' + index);
+                videoElement.removeAttribute("controlsList");
+                videoElement.removeAttribute("controls");
+                videoElement.muted = true;
+            } else {
+                _player.pause();
+                _player.unload();
+                let box = $("#videoElement" + (index)).parent();
+                box.html("");
+                box.append(
+                    '<video id="videoElement' + (index) + '" autoplay muted="true"></video>'
+                );
+            }
+            _player = null;
+            gPlayArray[index] = null;
+            $(".tv_control_sound").eq(index - 1).html("&#xe601;");
+            $(".tv_control_sound").eq(index - 1).data("state", "0");
+        }
+
+        function PlayControlSound(index, state) //by window no.
+        {
+            if (gPlayArray[index] == null) return false;
+            let _player = gPlayArray[index];
+
+            let videoElement = document.getElementById('videoElement' + index);
+            let _mode = gPlayMode[index];
+            if (parseInt(state) == 0) {
+                if (_mode == 1)
+                    _player.openAudio(true);
+                else
+                    videoElement.muted = false;
+            } else {
+                if (_mode == 1)
+                    _player.openAudio(false);
+                else
+                    videoElement.muted = true;
+            }
+            return true;
+        }
+
+        function PlayControlStart(winIndex) // start play.  by window no.
+        {
+            try {
+                PlayControlStop(winIndex);
+            } catch (e) {
+                gPlayArray[winIndex] = null;
+            }
+            if (!gEnableVerification) return;
+            let _mediaPara = {
+                type: 'flv',
+                hasAudio: true,
+                hasVideo: true,
+                url: (protocolStr + '//')
+            };
+            _mediaPara.url += gParaServerIp + ":" + gParaServerPort;
+            _mediaPara.url += "/flvRouter.php?live?";
+            _mediaPara.url += gToken; //+winIndex;
+            _mediaPara.url += "_" + gPlayChs[winIndex - 1].deviceId;
+            _mediaPara.url += "_" + gPlayChs[winIndex - 1].ch;
+            if (arguments[1] != null)
+                _mediaPara.url += "_" + arguments[1];
+            else {
+                var $obj = $("#playControlStream_" + winIndex);
+                _mediaPara.url += "_" + $obj.data("state");
+            }
+
+            function canvasPlay() {
+                let box = $("#videoElement" + (winIndex)).parent();
+
+                let h = box.height();
+                let w = box.width();
+                let url = _mediaPara.url;
+                box.html("");
+                box.append(
+                    `<canvas id="videoElement${winIndex
+                    }" width="${w}" height="${h}" autoplay muted="true" style="height: 100%; width: 100%;"></canvas>`
+                );
+
+                let temp_url = url.replace("live?", "_bywasm_live?");
+                temp_url = temp_url.replace("replay?", "_bywasm_replay?");
+                temp_url = temp_url.replace("fastReplay?", "_bywasm_fastReplay?");
+                let video = document.getElementById("videoElement" + (winIndex));
+
+                //alert(temp_url);
+
+                flvPlayer = new CanvasPlayer(video, temp_url);
+                gPlayArray[winIndex] = flvPlayer;
+                flvPlayer.setBufferTimeMs(gBufferMs);
+                flvPlayer.play();
+                flvPlayer.openAudio(false);
+
+                //that.vediowindows[index].flvPlayer = flvPlayer;
+                //that.vediowindows[index].iscanvas = true;
+                $(".tv_video_item_" + (winIndex) + " .tv_video_item_box_video").css("background", "");
+            }
+
+
+            let _mode = gPlayMode[winIndex];
+            //if(_mode==1)	//屏蔽掉固定使用w方案
+            {
+                gPlayMode[winIndex] = 1;
+                canvasPlay();
+
+                return;
+            }
+
+            var _controlPara = {
+                lazyLoadMaxDuration: 3 * 60
+            };
+
+            var flvPlayer = flvjs.createPlayer(_mediaPara, _controlPara);
+
+            gPlayArray[winIndex] = flvPlayer;
+            let _player = gPlayArray[winIndex];
+            let videoElement = document.getElementById('videoElement' + winIndex);
+
+            //controls controlsList='nofullscreen nodownload noremote noremoteplayback footbar' 
+            videoElement.setAttribute("controls", "1");
+            videoElement.setAttribute("controlsList", "nofullscreen nodownload noremote noremoteplayback footbar");
+
+            flvPlayer.attachMediaElement(videoElement);
+            flvPlayer.load();
+            flvPlayer.play();
+
+            //flvPlayer.on('error', err => {
+            // 	  alert("network "+winIndex + " error details:"+flvjs.ErrorDetails);
+            //});
+
+
+
+
+            flvPlayer.on(flvjs.Events.ERROR, (errType, errDetail) => {
+                let videoElement = document.getElementById('videoElement' + winIndex);
+                if (
+                    errType == "NetworkError" &&
+                    (errDetail == "UnrecoverableEarlyEof" || errDetail == "Exception") &&
+                    videoElement.currentTime == 0
+                ) {
+                    //alert("win: " + winIndex +  ";   error=" + errDetail + "; playTime=" + videoElement.currentTime);
+                    gPlayMode[winIndex] = 1;
+                    canvasPlay();
+                }
+            });
+
+
+
+        }
+        SSLPort = "36301";
+        function wsScheme() {
+            return window.location.protocol.replace(":", "") == "http" ? "ws" : "wss";
+        };
+
+
+        function changeWsUrl(ip, prot, type) {
+            const host = window.location.hostname;
+            if (wsScheme() == "ws") {
+                // 有些客户是局域网映射出外网，这里需要直接使用地址栏上的地址
+                if (v.proxy === true) {
+                    return `ws://${host}:${prot}/${type}`;
+                }
+
+                return `ws://${ip}:${prot}/${type}`;
+            } else {
+                let wsurl = `wss://${ip}:${SSLPort}/${type}?ipaddr=127.0.0.1`;
+
+                // // 有些客户是局域网映射出外网，这里需要直接使用地址栏上的地址
+                // if (v.proxy === true) {
+                //     return `wss://${host}:${SSLPort}/${type}?ipaddr=${ip}`;
+                // }
+
+                //子节点处理，由主节点代理过去？ 不清楚后台的逻辑
+                //TODO 暂时代理到226，后续在处理
+                if (ip != host) wsurl = `wss://${host}:${SSLPort}/${type}?ipaddr=${ip}`;
+                return wsurl;
+
+            }
+        };
+
+
+
+        function PlayControlAddToWin(playIndex) // add channel info to window.  start from 1
+        {
+            let _chObj = gPlayChs[playIndex - 1];
+
+            $("#win_titile_" + (playIndex)).text(_chObj.deviceId + "-" + _chObj.ch);
+            //win_titile_
+            $(".tv_video_item_box_ch").eq(playIndex - 1).css("display", "block");
+            $("#playControlStream_" + (playIndex)).css("display", "block");
+        }
+
+        // outer api
+        function PlayControlAddCh(deviceId, ch, stream) // add channle and play
+        {
+            //if(parameters[3]!=null)
+            //	winIndex
+
+
+            let win = 0;
+            for (i = 1; i < gPlayArray.length; i++) {
+                if (gPlayArray[i] == null) {
+                    win = i;
+                    break;
+                }
+            }
+            if (win == 0) win = gPlayArray.length; // add one window
+            if (win < 1) win = 1;
+
+            gPlayChs[win - 1] = {
+                "deviceId": deviceId,
+                "ch": ch
+            };
+            PlayControlAddToWin(win);
+            PlayControlStart(win);
+        }
+
+        window.onbeforeunload = function () {
+            for (i = 1; i < gPlayArray.length; i++) {
+                PlayControlStop(i);
+            }
+        }
+
+        $(window).resize(function () {
+
+            $("canvas").each(function () {
+                $(this).css('height', '100%');
+                $(this).css('width', '100%');
+            });
+            $("canvas").each(function () {
+                $(this).height = $(this).parent().innerHeight();
+                $(this).prop("height", $(this).parent().innerHeight());
+                $(this).width = $(this).parent().innerWidth();
+                $(this).prop("width", $(this).parent().innerWidth());
+            });
+        });
+
+        $(async function () {
+
+            await initEnvParas();
+            if (gToken == null) {
+                alert("Missing parameter: token");
+                return;
+            }
+
+            if (!gUICnfPanelDisplay) {
+                $("#divControllPanel").css("display", "none");
+            }
+
+            // let wincount = $(".tv_video").data("wincount");
+            //alert(gWincount);
+            initVideoWindow(gWincount);
+
+            if (enableTokenVerification) {
+                await getVerifyLegitimacy().then(res => {
+                    if (res && res.status == 10023) {
+                        gEnableVerification = false;
+                        return alert(res.msg);
+                    }
+                })
+            }
+
+            $(".tv_video_item").dblclick(function () {
+                if (gWincount == 1) return;
+                let ismax = $(".tv_video").data("ismaxwin");
+                if (!ismax) {
+                    $(".tv_video").css('display', 'inline');
+                    $(".tv_video_item").css('display', 'none');
+                    $(this).css('height', '100%');
+                    $(this).css('width', '100%');
+                    $(this).css('float', '');
+                    $(this).css('display', 'inline');
+                    $(".tv_video").data("ismaxwin", true);
+                } else {
+                    initVideoWindow($(".tv_video").data("wincount"));
+                    $(".tv_video").data("ismaxwin", false);
+                }
+            });
+
+            $(".wincount").click(function () {
+                let count = $(this).data("wincount");
+                $(".tv_video").data("wincount", count);
+                initVideoWindow(count);
+            });
+
+            $("#winFullscreen").click(function () {
+
+                const element = document.getElementById('tv_video');
+                //if (screenfull.isEnabled)
+                {
+
+                    screenfull.request(element);
+                }
+
+                setTimeout(() => {
+                    $("canvas").each(function () {
+                        $(this).height = $(this).parent().innerHeight();
+                        $(this).prop("height", $(this).parent().innerHeight());
+                        $(this).width = $(this).parent().innerWidth();
+                        $(this).prop("width", $(this).parent().innerWidth());
+                    });
+                }, 200);
+
+            });
+
+            $(".tab_nva").click(function () {
+                $('.tab_nva').parent().css('border-bottom-color', '#eeeeee');
+                $(this).parent().css('border-bottom-color', '#0094ff');
+            })
+
+
+
+            let _index = 1;
+            $(".tv_video_item_box_ch").each(function (index, element) {
+
+                {
+                    let _controlHtml = '<span id="win_titile_' + (index + 1) + '">' + (index + 1) + '</span>&nbsp;';
+                    _controlHtml += "<span id='video_control_button'  title='Start play' data-chnum='" + _index + "' class='iconfont tv_control_start'>&#xe626;</span>";
+                    _controlHtml += "<span id='video_control_stop' title=\"Stop\"><img data-chnum='" + _index + "' class='img-bottom-icon-stop' src='font/stop.png'/></span>";
+                    //					_controlHtml	+= "<span id='video_control_button'  title='mute ' data-chnum='"+ _index +"' class='iconfont tv_control_stop'>&#xe619;</span>";
+                    _controlHtml += "<span id='winFullscreen' data-chnum='" + _index + "' data-state='0' class='iconfont tv_control_sound'>&#xe601;</span>";
+
+                    if (hasIntercom)
+                        _controlHtml += "<span id='video_control_intercom' title=\"Intercom\" data-chnum='" + _index + "' class='iconfont tv_control_intercom'>&#xe6ec;</span>";
+
+
+                    $(this).append(_controlHtml);
+                    //if( _index<=gPlayNum  )
+                    //	$(this).css("display","block");
+                    //else
+                    $(this).css("display", "none");
+                }
+                _index++;
+            });
+
+            _index = 1;
+            $(".tv_video_item_box_title").each(function (index, element) {
+                //if( _index<=gPlayNum  )
+                {
+                    let _controlHtml = "<span id=\"playControlStream_" + _index + "\" data-index='" + _index + "' class=\"iconfont tv_video_item_box_hd\" data-state=\"0\">" + (gStream == 1 ? "&#xe615;" : "&#xe616;") + "</span>";
+                    $(this).append(_controlHtml);
+                    $("#playControlStream_" + _index).css("display", "none");
+                }
+                _index++;
+            });
+
+
+            $(".tv_control_start").click(function () {
+                PlayControlStart($(this).data("chnum"));
+
+            });
+            $(".tv_control_sound").click(function () {
+                let r = PlayControlSound($(this).data("chnum"), $(this).data("state"));
+
+                if (r) {
+                    $(this).html(($(this).data("state") == "1") ? "&#xe601;" : "&#xe609;");
+                    $(this).data("state", $(this).data("state") == "1" ? 0 : 1);
+                }
+
+            });
+
+
+
+            let recorder = null;
+            let MediaPlayer = null;
+            let intercoming = false;
+            // 对讲
+            $(".tv_control_intercom").click(function () {
+                var ch = $(this).data("chnum");
+                if (!intercoming) {
+
+                    try {
+                        HWRecorder.get(
+                            (rec) => {
+                                recorder = rec;
+                                recorder.start();
+                            },
+                            {
+                                sampleBits: 16,
+                                sampleRate: 8000,
+                            },
+                            (arrayOfPcmData) => {
+                                if (!MediaPlayer) {
+                                    const jsonRequest = `{"action":"3001","payload":{"sessionID":"${+new Date()}","deviceID":"${gDeviceId}","channel":"1","workMode":"1","username":"${gUserName}","bussType":"3"}}`;
+                                    const _wsurl = changeWsUrl(gParaServerIp, gParaServerPort, 'stream');
+                                    MediaPlayer = new HWMediaPlayer(_wsurl, jsonRequest);
+                                    MediaPlayer.play();
+                                    MediaPlayer.setSessionStateCallback((v) => {
+                                        if (v.state == -1) {
+                                            recorder.stop();
+                                            recorder = null;
+                                            MediaPlayer = null;
+                                            intercoming = false;
+                                            $(this).html("&#xe6ec;")
+                                        }
+                                        console.log(v);
+                                    });
+
+                                }
+
+                                try {
+                                    MediaPlayer.putInAudioPcm(arrayOfPcmData);
+                                    $(this).html("&#xe66d;")
+                                    intercoming = true;
+                                } catch (e) {
+                                    $(this).html("&#xe6ec;")
+                                    console.error(e)
+                                }
+
+                            },
+                            (code) => { console.error(code) }
+                        );
+                    } catch (e) {
+                        $(this).html("&#xe6ec;")
+                        console.error(e)
+                    }
+
+                }
+                else {
+
+                    recorder.stop();
+                    recorder = null;
+                    MediaPlayer.stop();
+                    MediaPlayer = null;
+                    intercoming = false;
+                    $(this).html("&#xe6ec;")
+                }
+
+            })
+
+            $(".tv_control_stop").click(function () {
+                PlayControlStop($(this).data("chnum"));
+            });
+            $(".img-bottom-icon-stop").click(function () {
+                PlayControlStop($(this).data("chnum"));
+            });
+
+
+            $("#playControl_stopall").click(function () {
+                for (i = 1; i < gPlayArray.length; i++) {
+                    PlayControlStop(i);
+                }
+            });
+
+            $(".tv_video_item_box_hd").click(function () {
+                if (parseInt($(this).data("state")) == 0) {
+                    $(this).data("state", 1);
+                    $(this).html("&#xe615;");
+                } else {
+                    $(this).data("state", 0);
+                    $(this).html("&#xe616;");
+                }
+                PlayControlStart($(this).data("index"), $(this).data("state"));
+            })
+
+            if (flvjs == undefined) return;
+            //if (flvjs.isSupported()) 
+            {
+                for (i = 1; i <= gPlayNum; i++) {
+                    PlayControlAddToWin(i);
+                    PlayControlStart(i, gStream);
+                }
+            }
+
+
+            /*
+                        if (flvjs.isSupported()) {
+                            let videoElement = document.getElementById('videoElement1');
+                            let flvPlayer = flvjs.createPlayer({
+                                type: 'flv',
+                                hasAudio: false,
+                                hasVideo: true,
+                                url: 'http://172.16.50.210:33122/live?1591212324_99990001_1_0'
+                            });
+                            flvPlayer.attachMediaElement(videoElement);
+                            flvPlayer.load();
+                            flvPlayer.play();
+                        }
+                        if (flvjs.isSupported()) {
+                            let videoElement = document.getElementById('videoElement2');
+                            let flvPlayer = flvjs.createPlayer({
+                                type: 'flv',
+                                hasAudio: false,
+                                hasVideo: true,
+                                url: 'http://172.16.50.210:33122/live?15a221ss2324_666888_7_1'
+                            });
+                            flvPlayer.attachMediaElement(videoElement);
+                            flvPlayer.load();
+                            flvPlayer.play();
+                        }
+            */
+            // if (flvjs.isSupported()) {
+            //     let videoElement = document.getElementById('videoElement3');
+            //     let flvPlayer = flvjs.createPlayer({
+            //         type: 'flv',
+            //         hasAudio: true,
+            //         hasVideo: true,
+            //         url: 'http://172.16.50.210:33122/live?15a221s2324_666888_7_0'
+            //     });
+            //     flvPlayer.attachMediaElement(videoElement);
+            //     flvPlayer.load();
+            //     flvPlayer.play();
+            // }
+            // if (flvjs.isSupported()) {
+            //     let videoElement = document.getElementById('videoElement4');
+            //     let flvPlayer = flvjs.createPlayer({
+            //         type: 'flv',
+            //         hasAudio: true,
+            //         hasVideo: true,
+            //         url: 'http://172.16.50.210:33122/live?1591212324_99990001_1_0'
+            //     });
+            //     flvPlayer.attachMediaElement(videoElement);
+            //     flvPlayer.load();
+            //     flvPlayer.play();
+            // }
+
+        });
+
+
+
+
+        function initVideoWindow(count) {
+
+            $(".tv_video").css('display', 'inline');
+            $(".tv_video_item").css('height', '');
+            $(".tv_video_item").css('width', '');
+            $(".tv_video_item").css('float', '');
+            $(".tv_video_item").css('display', 'none');
+            $(".tv_video_item_4").css('clear', '');
+
+            switch (count) {
+                case 1: //1 涓獥鍙�
+                    $(".tv_video_item_1").css('height', '100%');
+                    $(".tv_video_item_1").css('width', '100%');
+                    $(".tv_video_item_1").css('float', '');
+                    $('.tv_video_item_1').css('display', 'inline');
+                    $(".tv_video").css('display', 'inline');
+                    break;
+                case 2: //2 涓獥鍙�
+                    $(".tv_video_item_1").css('display', 'inline');
+                    $('.tv_video_item_2').css('display', 'inline');
+
+                    $(".tv_video_item_1").css('height', '100%');
+                    $(".tv_video_item_1").css('width', '50%');
+                    $(".tv_video_item_1").css('float', 'left');
+
+                    $(".tv_video_item_2").css('height', '100%');
+                    $(".tv_video_item_2").css('width', '50%');
+                    $(".tv_video_item_2").css('float', 'left');
+                    break;
+                case 4: // 4涓獥鍙�
+                    $('.tv_video_item_1').css('display', 'inline');
+                    $(".tv_video_item_2").css('display', 'inline')
+                    $(".tv_video_item_3").css('display', 'inline')
+                    $(".tv_video_item_4").css('display', 'inline')
+
+                    $(".tv_video_item_1").css('height', '50%');
+                    $(".tv_video_item_1").css('width', '50%');
+                    $(".tv_video_item_1").css('float', 'left');
+
+                    $(".tv_video_item_2").css('height', '50%');
+                    $(".tv_video_item_2").css('width', '50%');
+                    $(".tv_video_item_2").css('float', 'left');
+
+                    $(".tv_video_item_3").css('height', '50%');
+                    $(".tv_video_item_3").css('width', '50%');
+                    $(".tv_video_item_3").css('float', 'left');
+
+                    $(".tv_video_item_4").css('height', '50%');
+                    $(".tv_video_item_4").css('width', '50%');
+                    $(".tv_video_item_4").css('float', 'left');
+                    break;
+                case 6: //  
+
+                    $('.tv_video_item_1').css('display', 'inline');
+                    $(".tv_video_item_2").css('display', 'inline')
+                    $(".tv_video_item_3").css('display', 'inline')
+                    $(".tv_video_item_4").css('display', 'inline')
+                    $(".tv_video_item_5").css('display', 'inline')
+                    $(".tv_video_item_6").css('display', 'inline')
+
+                    $(".tv_video_item_1").css('height', '66.66%');
+                    $(".tv_video_item_1").css('width', '66.66%');
+                    $(".tv_video_item_1").css('float', 'left');
+
+                    $(".tv_video_item_2").css('height', '33.33%');
+                    $(".tv_video_item_2").css('width', '33.33%');
+                    $(".tv_video_item_2").css('float', 'left');
+
+                    $(".tv_video_item_3").css('height', '33.33%');
+                    $(".tv_video_item_3").css('width', '33.33%');
+                    $(".tv_video_item_3").css('float', 'left');
+
+                    $(".tv_video_item_4").css('height', '33.33%');
+                    $(".tv_video_item_4").css('width', '33.33%');
+                    $(".tv_video_item_4").css('float', 'left');
+                    $(".tv_video_item_4").css('clear', 'both');
+                    $(".tv_video_item_4").css('float', 'left');
+
+                    $(".tv_video_item_5").css('height', '33.33%');
+                    $(".tv_video_item_5").css('width', '33.33%');
+                    $(".tv_video_item_5").css('float', 'left');
+
+                    $(".tv_video_item_6").css('height', '33.33%');
+                    $(".tv_video_item_6").css('width', '33.33%');
+                    $(".tv_video_item_6").css('float', 'left');
+                    break;
+                case 9: //9涓獥鍙�
+                    $('.tv_video_item_1').css('display', 'inline');
+                    $(".tv_video_item_2").css('display', 'inline')
+                    $(".tv_video_item_3").css('display', 'inline')
+                    $(".tv_video_item_4").css('display', 'inline')
+                    $(".tv_video_item_5").css('display', 'inline')
+                    $(".tv_video_item_6").css('display', 'inline')
+                    $(".tv_video_item_7").css('display', 'inline')
+                    $(".tv_video_item_8").css('display', 'inline')
+                    $(".tv_video_item_9").css('display', 'inline')
+
+                    $(".tv_video_item_1").css('height', '33.33%');
+                    $(".tv_video_item_1").css('width', '33.33%');
+                    $(".tv_video_item_1").css('float', 'left');
+
+                    $(".tv_video_item_2").css('height', '33.33%');
+                    $(".tv_video_item_2").css('width', '33.33%');
+                    $(".tv_video_item_2").css('float', 'left');
+
+                    $(".tv_video_item_3").css('height', '33.33%');
+                    $(".tv_video_item_3").css('width', '33.33%');
+                    $(".tv_video_item_3").css('float', 'left');
+
+                    $(".tv_video_item_4").css('height', '33.33%');
+                    $(".tv_video_item_4").css('width', '33.33%');
+                    $(".tv_video_item_4").css('float', 'left');
+
+                    $(".tv_video_item_5").css('height', '33.33%');
+                    $(".tv_video_item_5").css('width', '33.33%');
+                    $(".tv_video_item_5").css('float', 'left');
+
+                    $(".tv_video_item_6").css('height', '33.33%');
+                    $(".tv_video_item_6").css('width', '33.33%');
+                    $(".tv_video_item_6").css('float', 'left');
+
+                    $(".tv_video_item_9").css('height', '33.33%');
+                    $(".tv_video_item_9").css('width', '33.33%');
+                    $(".tv_video_item_9").css('float', 'left');
+
+                    $(".tv_video_item_7").css('height', '33.33%');
+                    $(".tv_video_item_7").css('width', '33.33%');
+                    $(".tv_video_item_7").css('float', 'left');
+
+                    $(".tv_video_item_8").css('height', '33.33%');
+                    $(".tv_video_item_8").css('width', '33.33%');
+                    $(".tv_video_item_8").css('float', 'left');
+                    break;
+                case 16: //16 绐楀彛
+                    $(".tv_video_item").css('display', 'inline')
+                    $(".tv_video_item").css('height', '25%');
+                    $(".tv_video_item").css('width', '25%');
+                    $(".tv_video_item").css('float', 'left');
+
+                    break;
+                default:
+                    break;
+            }
+
+            $("canvas").each(function () {
+                $(this).css('height', '100%');
+                $(this).css('width', '100%');
+            });
+
+        }
+    </script>
+
+
+    <style>
+        html {
+            overflow: hidden;
+        }
+
+        body {
+            padding: 0px;
+            ;
+        }
+    </style>
+
+</head>
+
+<body>
+
+    <div id="content">
+        <div class="tv_left">
+            <div class='tv_control' id="divControllPanel">
+                <span data-wincount="1" class="wincount iconfont tv_control_font">&#xe603;</span>
+                <span data-wincount="2" class="wincount tv_control_font1">
+
+                    <svg style="width: 22px;height:19px;vertical-align: middle;" xmlns="http://www.w3.org/2000/svg"
+                        version="1.1">
+                        <rect width="10" height="16" />
+                        <rect width="10" x="12" height="16" />
+                    </svg>
+
+                </span>
+                <span data-wincount="4" class="wincount iconfont tv_control_font">&#xe654;</span>
+                <span data-wincount="6" class="wincount iconfont tv_control_font">&#xe602;</span>
+                <span data-wincount="9" class="wincount iconfont tv_control_font">&#xe605;</span>
+
+                <!-- <span class="iconfont tv_control_font">&#xe619;</span>-->
+                <span id='playControl_stopall' title="Stop all"><img class='img-top-icon' src='font/stop.png' /></span>
+                <span id='winFullscreen' class="iconfont tv_control_font">&#xe6cc;</span>
+
+            </div>
+            <div class='tv_video' id="tv_video" data-wincount="4" data-ismaxwin="false">
+
+                <div class="tv_video_item_1 tv_video_item">
+                    <div class="tv_video_item_box">
+
+
+                        <div class="tv_video_item_box_video">
+                            <video id="videoElement1" autoplay muted></video>
+                        </div>
+
+                        <div class="tv_video_item_box_title">
+
+
+                            <div class="tv_video_item_box_ch">
+
+                            </div>
+
+                        </div>
+                    </div>
+                </div>
+                <div class="tv_video_item_2 tv_video_item">
+                    <div class="tv_video_item_box">
+                        <div class="tv_video_item_box_video">
+                            <video id="videoElement2" autoplay muted></video>
+                        </div>
+                        <div class="tv_video_item_box_title">
+
+
+                            <div class="tv_video_item_box_ch">
+
+                            </div>
+
+                        </div>
+                    </div>
+                </div>
+                <div class="tv_video_item_3 tv_video_item">
+                    <div class="tv_video_item_box">
+                        <div class="tv_video_item_box_video">
+                            <video id="videoElement3" autoplay muted></video>
+                        </div>
+                        <div class="tv_video_item_box_title">
+
+
+                            <div class="tv_video_item_box_ch">
+
+                            </div>
+
+                        </div>
+                    </div>
+                </div>
+                <div class="tv_video_item_4 tv_video_item">
+                    <div class="tv_video_item_box">
+                        <div class="tv_video_item_box_video">
+                            <video id="videoElement4" autoplay muted></video>
+                        </div>
+                        <div class="tv_video_item_box_title">
+
+
+                            <div class="tv_video_item_box_ch">
+
+                            </div>
+
+                        </div>
+                    </div>
+                </div>
+                <div class="tv_video_item_5 tv_video_item">
+                    <div class="tv_video_item_box">
+                        <div class="tv_video_item_box_video">
+                            <video id="videoElement5" autoplay muted></video>
+                        </div>
+                        <div class="tv_video_item_box_title">
+
+
+                            <div class="tv_video_item_box_ch">
+
+                            </div>
+
+                        </div>
+                    </div>
+                </div>
+                <div class="tv_video_item_6 tv_video_item">
+                    <div class="tv_video_item_box">
+                        <div class="tv_video_item_box_video">
+                            <video id="videoElement6" autoplay muted></video>
+                        </div>
+                        <div class="tv_video_item_box_title">
+
+
+                            <div class="tv_video_item_box_ch">
+
+                            </div>
+
+                        </div>
+                    </div>
+                </div>
+                <div class="tv_video_item_7 tv_video_item">
+                    <div class="tv_video_item_box">
+                        <div class="tv_video_item_box_video">
+                            <video id="videoElement7" autoplay muted></video>
+                        </div>
+                        <div class="tv_video_item_box_title">
+
+
+                            <div class="tv_video_item_box_ch">
+
+                            </div>
+
+                        </div>
+                    </div>
+                </div>
+                <div class="tv_video_item_8 tv_video_item">
+                    <div class="tv_video_item_box">
+                        <div class="tv_video_item_box_video">
+                            <video id="videoElement8" autoplay muted></video>
+                        </div>
+                        <div class="tv_video_item_box_title">
+
+
+                            <div class="tv_video_item_box_ch">
+
+                            </div>
+
+                        </div>
+                    </div>
+                </div>
+                <div class="tv_video_item_9 tv_video_item">
+                    <div class="tv_video_item_box">
+                        <div class="tv_video_item_box_video">
+                            <video id="videoElement9" autoplay muted></video>
+                        </div>
+                        <div class="tv_video_item_box_title">
+
+
+                            <div class="tv_video_item_box_ch">
+
+                            </div>
+
+                        </div>
+                    </div>
+                </div>
+                <div class="tv_video_item_10 tv_video_item">
+                    <div class="tv_video_item_box">
+                        <div class="tv_video_item_box_video">
+                            <video id="videoElement10" autoplay muted></video>
+                        </div>
+                        <div class="tv_video_item_box_title">
+
+
+                            <div class="tv_video_item_box_ch">
+
+                            </div>
+
+                        </div>
+                    </div>
+                </div>
+                <div class="tv_video_item_11 tv_video_item">
+                    <div class="tv_video_item_box">
+                        <div class="tv_video_item_box_video">
+                            <video id="videoElement11" autoplay muted></video>
+                        </div>
+                        <div class="tv_video_item_box_title">
+
+
+                            <div class="tv_video_item_box_ch">
+
+                            </div>
+
+                        </div>
+                    </div>
+                </div>
+                <div class="tv_video_item_12 tv_video_item">
+                    <div class="tv_video_item_box">
+                        <div class="tv_video_item_box_video">
+                            <video id="videoElement12" autoplay muted></video>
+                        </div>
+                        <div class="tv_video_item_box_title">
+
+
+                            <div class="tv_video_item_box_ch">
+
+                            </div>
+
+                        </div>
+                    </div>
+                </div>
+                <div class="tv_video_item_13 tv_video_item">
+                    <div class="tv_video_item_box">
+                        <div class="tv_video_item_box_video">
+                            <video id="videoElement13" autoplay muted></video>
+                        </div>
+                        <div class="tv_video_item_box_title">
+
+
+                            <div class="tv_video_item_box_ch">
+
+                            </div>
+
+                        </div>
+                    </div>
+                </div>
+                <div class="tv_video_item_14 tv_video_item">
+                    <div class="tv_video_item_box">
+                        <div class="tv_video_item_box_video">
+                            <video id="videoElement14" autoplay muted></video>
+                        </div>
+                        <div class="tv_video_item_box_title">
+
+
+                            <div class="tv_video_item_box_ch">
+
+                            </div>
+
+                        </div>
+                    </div>
+                </div>
+                <div class="tv_video_item_15 tv_video_item">
+                    <div class="tv_video_item_box">
+                        <div class="tv_video_item_box_video">
+                            <video id="videoElement15" autoplay muted></video>
+                        </div>
+                        <div class="tv_video_item_box_title">
+
+
+                            <div class="tv_video_item_box_ch">
+
+                            </div>
+
+                        </div>
+                    </div>
+                </div>
+                <div class="tv_video_item_16 tv_video_item">
+                    <div class="tv_video_item_box">
+                        <div class="tv_video_item_box_video">
+                            <video id="videoElement16" autoplay muted></video>
+                        </div>
+                        <div class="tv_video_item_box_title">
+                            <div class="tv_video_item_box_ch">
+
+                            </div>
+
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+
+        </div>
+    </div>
+
+</body>
+
+
+
+</html>

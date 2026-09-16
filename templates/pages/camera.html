@@ -1,0 +1,93 @@
+{% extends 'layout.html' %}
+{% from 'partials/macros.html' import kpi_row, page_header %}
+
+{% block content %}
+{{ page_header(title, subtitle) }}
+
+<form method="get" class="filter-row device-picker-row">
+  <div class="device-picker" data-device-picker>
+    <label class="device-picker-label" for="camera-picker-input">Vehicle</label>
+    <div class="device-picker-control">
+      <input
+        id="camera-picker-input"
+        type="search"
+        class="device-picker-input"
+        placeholder="Search by name, device ID, or fleet…"
+        value="{{ device_selected_label }}"
+        autocomplete="off"
+        spellcheck="false"
+      >
+      <input type="hidden" name="device_id" value="{{ device_id }}">
+      <ul class="device-picker-list" role="listbox" hidden>
+        {% for opt in device_options %}
+          <li
+            role="option"
+            data-device-id="{{ opt.id }}"
+            data-label="{{ opt.label }}"
+          >{{ opt.label }}</li>
+        {% endfor %}
+      </ul>
+    </div>
+  </div>
+</form>
+
+{% if not token_ok %}
+  <div class="banner banner-warn" role="alert">
+    <strong>VSS live video unavailable:</strong> {{ token_error }}
+  </div>
+{% elif not embed_iframes %}
+  <div class="banner banner-info">
+    Live embed is unavailable for this host/scheme. Use <strong>Open live view</strong> on each channel.
+  </div>
+{% elif use_vss_proxy %}
+  <div class="banner banner-info">
+    Live video connects via <strong>wss://{{ vss_stream_host }}:{{ vss_stream_ws_port }}</strong> (proxied to the VSS media server).
+  </div>
+{% endif %}
+
+{% if device_id %}
+  {% if kpis %}
+    {{ kpi_row(kpis) }}
+  {% endif %}
+
+  <div class="camera-grid">
+    {% for ch in channels %}
+      <section class="camera-panel{% if not ch.ok %} camera-panel-bad{% endif %}">
+        <header class="camera-panel-header">
+          <div class="camera-panel-title">
+            <span class="camera-panel-label">{{ ch.label }}</span>
+            <span class="fault-pill {% if ch.ok %}ok{% else %}bad{% endif %}">RT: {{ ch.status }}</span>
+          </div>
+          {% if ch.open_url %}
+            <a class="camera-open-link" href="{{ ch.open_url }}" target="_blank" rel="noopener noreferrer">Open live view</a>
+          {% endif %}
+        </header>
+        {% if ch.url and embed_iframes %}
+          <iframe
+            class="camera-frame"
+            src="{{ ch.url }}"
+            title="{{ ch.label }} live feed for device {{ device_id }}"
+            loading="lazy"
+            allow="autoplay; fullscreen"
+            referrerpolicy="no-referrer-when-downgrade"
+          ></iframe>
+        {% elif ch.open_url %}
+          <div class="camera-link-fallback">
+            <p>Live embed blocked on HTTPS. Open this channel in a new tab to verify the camera.</p>
+            <a class="btn btn-secondary" href="{{ ch.open_url }}" target="_blank" rel="noopener noreferrer">Open {{ ch.label }}</a>
+          </div>
+        {% else %}
+          <div class="camera-link-fallback">
+            <p class="muted-msg">No stream URL — refresh VSS token and reload.</p>
+          </div>
+        {% endif %}
+      </section>
+    {% endfor %}
+  </div>
+{% else %}
+  <div class="banner banner-info">
+    Select a <strong>{{ brand_name }} fleet</strong> vehicle above to view live CH1–CH4 feeds. Cross-check with
+    <a href="/dashboard/realtime">Real-Time Status</a> video-lost flags.
+  </div>
+{% endif %}
+{% endblock %}

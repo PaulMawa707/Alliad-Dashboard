@@ -1,0 +1,259 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>{% block title %}{{ title }} · {{ brand_name }} {{ brand_tagline }}{% endblock %}</title>
+  {% if request.headers.get('X-Requested-With') != 'fetch' %}
+  <link rel="icon" type="image/png" href="{{ url_for('static', filename='controltech_logo.png') }}">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="{{ url_for('static', filename='flask-theme.css', v='20260910b') }}">
+  <script src="https://cdn.plot.ly/plotly-2.35.2.min.js" charset="utf-8"></script>
+  <script src="{{ url_for('static', filename='filters.js') }}" defer></script>
+  <script src="{{ url_for('static', filename='tables.js') }}" defer></script>
+  <script src="{{ url_for('static', filename='device-picker.js') }}" defer></script>
+  <script src="{{ url_for('static', filename='sidebar.js', v='20260908s') }}" defer></script>
+  <script src="{{ url_for('static', filename='dashboard-nav.js', v='20260910b') }}" defer></script>
+  {% block head_extra %}{% endblock %}
+  <script>
+    // Applied before first paint so the collapsed rail does not flash open.
+    (function () {
+      try {
+        var saved = localStorage.getItem('dhl-sidebar-collapsed');
+        if ((saved === null || saved === '1') && !window.matchMedia('(max-width: 900px)').matches) {
+          document.documentElement.classList.add('sidebar-collapsed');
+          if (document.body) document.body.classList.add('sidebar-collapsed');
+        }
+      } catch (e) {}
+    })();
+  </script>
+  {% endif %}
+</head>
+<body{% if awaiting_vss %} data-awaiting-realtime="1"{% endif %}>
+  {% if request.headers.get('X-Requested-With') != 'fetch' %}
+  {% include 'partials/topbar.html' %}
+  {% endif %}
+  {% include 'partials/sidebar_mobile.html' %}
+
+  <div class="app-layout">
+    {% include 'partials/sidebar.html' %}
+    <main class="main-content">
+      {% if vss_error %}
+        <div class="banner banner-warn" role="alert">
+          <strong>VSS connection issue:</strong> {{ vss_error }}
+        </div>
+      {% endif %}
+      {% block content %}{% endblock %}
+    </main>
+  </div>
+
+  {% if request.headers.get('X-Requested-With') != 'fetch' %}
+  <script>
+    function updateClock() {
+      const el = document.getElementById('topbar-clock');
+      if (!el) return;
+      const now = new Date();
+      el.textContent = now.toLocaleString(undefined, {
+        weekday: 'short', year: 'numeric', month: 'short',
+        day: 'numeric', hour: '2-digit', minute: '2-digit', second: '2-digit'
+      });
+    }
+    updateClock();
+    setInterval(updateClock, 1000);
+
+    function applyAutoRefreshStatus(info) {
+      const el = document.getElementById('auto-refresh-at');
+      if (!el || !info || !info.at_display) return;
+      el.textContent = info.at_display;
+      const wrap = document.getElementById('auto-refresh-status');
+      if (wrap) wrap.title = 'Last auto-refresh ' + info.at_display + ' (EAT)';
+    }
+
+    async function pollAutoRefreshTime() {
+      if (window.__dashboardRefreshRunning) return;
+      try {
+        const r = await fetch('/api/cache/status', { credentials: 'same-origin' });
+        if (!r.ok) return;
+        const data = await r.json();
+        applyAutoRefreshStatus(data.last_auto_refresh);
+      } catch (_) {}
+    }
+    pollAutoRefreshTime();
+    setInterval(pollAutoRefreshTime, 30000);
+
+    async function refreshCacheStatus() {
+      // Only reload while the page is still showing the "waiting for data" state;
+      // otherwise a poll would fight with whatever tab the user just opened.
+      if (document.body.dataset.awaitingRealtime !== '1' || window.__dashboardRefreshRunning) return;
+      try {
+        const r = await fetch('/api/cache/status');
+        if (!r.ok) return;
+        const data = await r.json();
+        if (data.freshness && data.freshness.realtime_status && data.freshness.realtime_status !== 'not loaded') {
+          document.body.dataset.awaitingRealtime = '';
+          window.__dhlAwaitingRealtime = false;
+          window.dashboardClearPageCache?.();
+          window.dashboardNavigateTo?.(window.location.href, { force: true, updateHistory: false, background: true });
+        }
+      } catch (_) {}
+    }
+    refreshCacheStatus();
+    setInterval(refreshCacheStatus, {{ ui_poll_ms }});
+
+    // Realtime auto-refresh. Serverless invocations are short-lived, so the
+    // schedule lives in the page: the server tells us how old the snapshot is,
+    // we add the time since page load, and once that crosses the interval we
+    // ask the server to re-pull using the VSS token it already has.
+    (function () {
+      const intervalSeconds = {{ realtime_auto_refresh_seconds | int }};
+      if (!intervalSeconds) return;
+
+      let ageAtLoad = {{ realtime_age_seconds if realtime_age_seconds is not none else 'null' }};
+      let measuredAt = Date.now();
+      let retryAfter = 0;
+      let inFlight = false;
+
+      function snapshotAgeSeconds() {
+        const elapsed = (Date.now() - measuredAt) / 1000;
+        return ageAtLoad === null ? elapsed : ageAtLoad + elapsed;
+      }
+
+      async function maybeRefresh() {
+        if (inFlight || window.__dashboardRefreshRunning) return;
+        // The "waiting for data" poll already reloads the page on its own.
+        if (document.body.dataset.awaitingRealtime === '1') return;
+        if (Date.now() < retryAfter || snapshotAgeSeconds() < intervalSeconds) return;
+
+        inFlight = true;
+        try {
+          const r = await fetch('/api/refresh/realtime', {
+            method: 'POST',
+            credentials: 'same-origin'
+          });
+          const data = r.ok ? await r.json() : {};
+          if (typeof data.age_seconds === 'number') {
+            ageAtLoad = data.age_seconds;
+            measuredAt = Date.now();
+          }
+          applyAutoRefreshStatus(data.last_auto_refresh);
+          if (data.refreshed) {
+            window.dashboardClearPageCache?.();
+            window.dashboardNavigateTo?.(window.location.href, {
+              force: true,
+              updateHistory: false,
+              background: true
+            });
+          } else if (data.reason && data.reason !== 'fresh') {
+            // No usable token, another pull already running, or VSS errored —
+            // wait a while instead of retrying every tick.
+            retryAfter = Date.now() + 5 * 60 * 1000;
+          }
+        } catch (_) {
+          retryAfter = Date.now() + 5 * 60 * 1000;
+        } finally {
+          inFlight = false;
+        }
+      }
+
+      setInterval(maybeRefresh, 30000);
+      maybeRefresh();
+    })();
+
+    const REFRESH_STEP_LABELS = {
+      track3_units: 'Track3 units…',
+      behaviour: 'Driver behaviour…',
+      vss_devices: 'Devices…',
+      vss_realtime: 'Live status…',
+      vss_alarms: 'Alarms…',
+      mix: 'MiX health…'
+    };
+
+    async function refreshStep(step) {
+      const r = await fetch('/api/refresh', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        credentials: 'same-origin',
+        body: JSON.stringify({ step })
+      });
+      if (r.status === 504) return { ok: false, error: 'Step "' + step + '" exceeded the server time limit.' };
+      if (!r.ok) return { ok: false, error: 'Step "' + step + '" failed (HTTP ' + r.status + ').' };
+      return await r.json().catch(() => ({ ok: false, error: 'Invalid server response.' }));
+    }
+
+    document.getElementById('btn-refresh')?.addEventListener('click', async function () {
+      const btn = this;
+      btn.disabled = true;
+      btn.textContent = 'Refreshing…';
+      window.__dashboardRefreshRunning = true;
+      try {
+        const start = await refreshStep('start');
+        if (!start.ok) {
+          alert(start.error || 'Refresh could not start. Check the Logs tab for details.');
+          btn.disabled = false;
+          btn.textContent = 'Refresh data';
+          return;
+        }
+        for (const step of (start.steps || [])) {
+          btn.textContent = REFRESH_STEP_LABELS[step] || 'Refreshing…';
+          await refreshStep(step);
+          // Show each stage's data as soon as it lands instead of waiting for the whole run.
+          window.dashboardClearPageCache?.();
+          window.dashboardNavigateTo?.(window.location.href, { force: true, updateHistory: false, background: true });
+        }
+        btn.textContent = 'Saving…';
+        const data = await refreshStep('finish');
+        if (data.ok === false && !data.counts) {
+          alert(data.error || data.vss_error || 'Refresh failed. Check the Logs tab for details.');
+          btn.disabled = false;
+          btn.textContent = 'Refresh data';
+          return;
+        }
+        if (data.mix_error) {
+          console.warn('MiX refresh failed:', data.mix_error);
+        }
+        if (data.track3_error) {
+          console.warn('Track3 refresh issue:', data.track3_error);
+        }
+        if (data.vss_error) {
+          alert('VSS refresh issue:\n\n' + data.vss_error);
+        } else if (data.mix_error && !data.counts?.dhl_devices) {
+          alert('Refresh incomplete — MiX failed and no VSS devices loaded.\n\n' + data.mix_error);
+        } else if (data.mix_error) {
+          alert('VSS refreshed. MiX is unchanged (credentials issue):\n\n' + data.mix_error);
+        }
+        window.dashboardClearPageCache?.();
+        if (window.dashboardNavigateTo) {
+          window.dashboardNavigateTo(window.location.href, { force: true, updateHistory: false });
+        } else {
+          window.location.reload();
+        }
+        btn.disabled = false;
+        btn.textContent = 'Refresh data';
+      } catch (_) {
+        alert('Refresh failed — network error.');
+        btn.disabled = false;
+        btn.textContent = 'Refresh data';
+      } finally {
+        window.__dashboardRefreshRunning = false;
+      }
+    });
+
+    document.getElementById('btn-signout')?.addEventListener('click', async function () {
+      const btn = this;
+      btn.disabled = true;
+      btn.textContent = 'Signing out…';
+      try {
+        const r = await fetch('/api/logout', { method: 'POST', credentials: 'same-origin' });
+        const data = r.ok ? await r.json() : {};
+        window.location.replace(data.redirect || '/login');
+      } catch (_) {
+        window.location.replace('/login');
+      }
+    });
+  </script>
+  {% endif %}
+  {% block scripts %}{% endblock %}
+</body>
+</html>

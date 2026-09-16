@@ -1,0 +1,36 @@
+{% extends 'layout.html' %}
+{% from 'partials/macros.html' import kpi_row, page_header %}
+{% from 'partials/filters.html' import filter_panel, filter_multi, filter_select, filter_submit %}
+
+{% block content %}
+{{ page_header(title, subtitle) }}
+
+{% if notice %}
+  <div class="banner banner-warn" role="status">{{ notice }}</div>
+{% endif %}
+
+{% call filter_panel() %}
+  {{ filter_multi('behaviour', 'Behaviour', behaviour_opts, behaviours) }}
+  {{ filter_multi('source', 'Platform', source_opts, sources) }}
+  {{ filter_select('chart', 'Chart', chart_opts, chart) }}
+  {{ filter_submit() }}
+{% endcall %}
+
+{{ kpi_row(kpis) }}
+
+{% if chart_html %}
+  <div class="chart-card full">{{ chart_html|safe }}</div>
+{% endif %}
+
+{% if per_asset_table_html %}
+  <div class="table-card">
+    <h3 class="table-title">Violations per vehicle ({{ window_label }})</h3>
+    {{ per_asset_table_html|safe }}
+  </div>
+{% endif %}
+
+<div class="table-card">
+  <h3 class="table-title">Every violation ({{ window_label }})</h3>
+  {{ table_html|safe }}
+</div>
+{% endblock %}

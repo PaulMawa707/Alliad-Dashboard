@@ -1,0 +1,23 @@
+{% macro nav_icon(name) -%}
+{% if name == 'grid' %}
+<svg viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="3" width="7" height="7" rx="1" stroke-width="2"/><rect x="14" y="3" width="7" height="7" rx="1" stroke-width="2"/><rect x="3" y="14" width="7" height="7" rx="1" stroke-width="2"/><rect x="14" y="14" width="7" height="7" rx="1" stroke-width="2"/></svg>
+{% elif name == 'satellite' %}
+<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3l2.5 6.5L21 12l-6.5 2.5L12 21l-2.5-6.5L3 12l6.5-2.5L12 3z" stroke-width="2" stroke-linejoin="round"/><circle cx="12" cy="12" r="2" stroke-width="2"/></svg>
+{% elif name == 'radio' %}
+<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4.9 4.9a10 10 0 0 1 14.2 0" stroke-width="2" stroke-linecap="round"/><path d="M7.8 7.8a6 6 0 0 1 8.4 0" stroke-width="2" stroke-linecap="round"/><circle cx="12" cy="16" r="2" stroke-width="2"/><path d="M12 18v2" stroke-width="2" stroke-linecap="round"/></svg>
+{% elif name == 'bell' %}
+<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M18 8a6 6 0 1 0-12 0c0 7-3 9-3 9h18s-3-2-3-9" stroke-width="2" stroke-linejoin="round"/><path d="M13.7 21a2 2 0 0 1-3.4 0" stroke-width="2" stroke-linecap="round"/></svg>
+{% elif name == 'camera' %}
+<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 8h4l2-3h4l2 3h4v10H4V8z" stroke-width="2" stroke-linejoin="round"/><circle cx="12" cy="13" r="3.5" stroke-width="2"/></svg>
+{% elif name == 'search' %}
+<svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="11" cy="11" r="7" stroke-width="2"/><path d="M20 20l-3.5-3.5" stroke-width="2" stroke-linecap="round"/></svg>
+{% elif name == 'gauge' %}
+<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3.5 18a9 9 0 1 1 17 0" stroke-width="2" stroke-linecap="round"/><path d="M12 18l4.5-6" stroke-width="2" stroke-linecap="round"/><circle cx="12" cy="18" r="1.6" stroke-width="2"/></svg>
+{% elif name == 'truck' %}
+<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 7h10v8H3z" stroke-width="2" stroke-linejoin="round"/><path d="M13 10h4l3 3v2h-7z" stroke-width="2" stroke-linejoin="round"/><circle cx="7" cy="17" r="1.8" stroke-width="2"/><circle cx="17" cy="17" r="1.8" stroke-width="2"/></svg>
+{% elif name == 'document' %}
+<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M8 4h6l4 4v12a1 1 0 0 1-1 1H8a1 1 0 0 1-1-1V5a1 1 0 0 1 1-1z" stroke-width="2" stroke-linejoin="round"/><path d="M14 4v4h4" stroke-width="2" stroke-linejoin="round"/><path d="M9 12h6M9 16h6" stroke-width="2" stroke-linecap="round"/></svg>
+{% else %}
+<svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="9" stroke-width="2"/></svg>
+{% endif %}
+{%- endmacro %}

@@ -1,0 +1,786 @@
+"""Reusable Plotly figure builders + small UI helpers for the Alliad dashboard."""
+
+from __future__ import annotations
+
+from html import escape
+from typing import Iterable
+from urllib.parse import quote
+
+import pandas as pd
+import plotly.express as px
+import plotly.graph_objects as go
+
+from data import RT_VIDEO_LOST_CHANNEL_MAX, parse_channels
+
+# Chart palette. The DHL_* names are kept because every view imports them; the
+# values are Alliad's: brand blue for headings, alert red/amber for bad states.
+BRAND_PRIMARY = "#0F4C81"
+BRAND_SECONDARY = "#F4A81D"
+# Driver-behaviour KPI accents (kept in step with behaviour.BEHAVIOUR_COLORS).
+BEHAVIOUR_COLOR_OVERSPEED = "#DC2626"
+BEHAVIOUR_COLOR_ACCEL = "#F59E0B"
+BEHAVIOUR_COLOR_BRAKE = "#2563EB"
+BEHAVIOUR_COLOR_CORNER = "#7C3AED"
+DHL_RED = "#DC2626"
+DHL_YELLOW = "#F59E0B"
+DHL_GRAY = "#3B3B3B"
+CHART_BLUE = "#2563EB"
+CHART_GREEN = "#2E8B57"
+CHART_ORANGE = "#F97316"
+CHART_PURPLE = "#8B5CF6"
+CHART_CYAN = "#06B6D4"
+CHART_SLATE = "#64748B"
+COLORWAY = [BRAND_PRIMARY, DHL_RED, CHART_GREEN, BRAND_SECONDARY, CHART_PURPLE, CHART_ORANGE, CHART_CYAN, CHART_SLATE]
+
+DEFAULT_LAYOUT = dict(
+    margin=dict(l=48, r=32, t=72, b=48),
+    paper_bgcolor="#FFFFFF",
+    plot_bgcolor="#FAFBFC",
+    colorway=COLORWAY,
+    font=dict(family="Inter, Segoe UI, Arial, sans-serif", size=12, color="#334155"),
+    title_font=dict(size=16, color="#0F172A", family="Inter, Segoe UI, Arial, sans-serif"),
+    legend=dict(
+        orientation="h",
+        yanchor="bottom",
+        y=1.02,
+        xanchor="left",
+        x=0,
+        font=dict(size=11),
+        bgcolor="rgba(255,255,255,0.8)",
+    ),
+    hoverlabel=dict(bgcolor="#0F172A", font=dict(color="#FFFFFF", size=12)),
+)
+
+_AXIS_LAYOUT = dict(
+    xaxis=dict(showgrid=True, gridcolor="#E2E8F0", linecolor="#CBD5E1", zeroline=False),
+    yaxis=dict(showgrid=True, gridcolor="#E2E8F0", linecolor="#CBD5E1", zeroline=False),
+)
+
+
+def _chart_title(text: str) -> dict:
+    return dict(
+        text=f"<b>{text}</b>",
+        x=0.02,
+        xanchor="left",
+        y=0.98,
+        yanchor="top",
+        font=dict(size=16, color="#0F172A", family="Inter, Segoe UI, Arial, sans-serif"),
+    )
+
+
+def _pie_layout(title: str) -> dict:
+    base = dict(DEFAULT_LAYOUT)
+    base.update(_AXIS_LAYOUT)
+    base.update(
+        title=_chart_title(title),
+        margin=dict(l=16, r=140, t=64, b=16),
+        showlegend=True,
+        legend=dict(
+            orientation="v",
+            yanchor="middle",
+            y=0.5,
+            xanchor="left",
+            x=1.01,
+            font=dict(size=11),
+            bgcolor="rgba(255,255,255,0.95)",
+            bordercolor="#E2E8F0",
+            borderwidth=1,
+        ),
+    )
+    return base
+
+
+def _bar_layout(title: str, *, x_title: str = "", y_title: str = "", showlegend: bool = False) -> dict:
+    base = dict(DEFAULT_LAYOUT)
+    base.update(_AXIS_LAYOUT)
+    base.update(
+        title=_chart_title(title),
+        margin=dict(l=56, r=28, t=72, b=56),
+        showlegend=showlegend,
+        xaxis_title=x_title,
+        yaxis_title=y_title,
+    )
+    return base
+
+EMPTY_FIG = go.Figure().update_layout(
+    **DEFAULT_LAYOUT,
+    annotations=[dict(text="No data", x=0.5, y=0.5, xref="paper", yref="paper", showarrow=False, font=dict(size=18, color="#999"))],
+    xaxis=dict(visible=False),
+    yaxis=dict(visible=False),
+)
+
+
+def loading_fig(message: str) -> go.Figure:
+    """Placeholder chart while VSS data is still being fetched."""
+    return go.Figure().update_layout(
+        **DEFAULT_LAYOUT,
+        title=dict(text="", font=dict(size=1)),
+        annotations=[
+            dict(
+                text=message,
+                x=0.5,
+                y=0.5,
+                xref="paper",
+                yref="paper",
+                showarrow=False,
+                font=dict(size=15, color="#6B7280"),
+            )
+        ],
+        xaxis=dict(visible=False),
+        yaxis=dict(visible=False),
+    )
+
+
+# Online / offline
+
+def _online_window_label(hours: float) -> str:
+    minutes = float(hours) * 60.0
+    if minutes < 59.5:
+        return f"{minutes:g} min"
+    if float(hours).is_integer():
+        return f"{int(hours)}h"
+    return f"{hours:g}h"
+
+
+def online_offline_pie(rt_df: pd.DataFrame, age_hours_threshold: float) -> go.Figure:
+    if rt_df is None or rt_df.empty:
+        return EMPTY_FIG
+
+    age = pd.to_numeric(rt_df.get("AgeHours"), errors="coerce")
+    online_mask = age.notna() & (age <= age_hours_threshold)
+    offline_mask = age.notna() & (age > age_hours_threshold)
+    unknown_mask = age.isna()
+
+    counts = pd.Series(
+        {
+            "Online": int(online_mask.sum()),
+            "Offline": int(offline_mask.sum()),
+            "Status Unknown": int(unknown_mask.sum()),
+        }
+    )
+    counts = counts[counts > 0]
+    if counts.empty:
+        return EMPTY_FIG
+
+    fig = px.pie(
+        names=counts.index,
+        values=counts.values,
+        hole=0.55,
+        color=counts.index,
+        color_discrete_map={"Online": "#2E8B57", "Offline": DHL_RED, "Status Unknown": "#999"},
+    )
+    fig.update_traces(textposition="inside", textinfo="percent+label", marker=dict(line=dict(color="#FFFFFF", width=2)))
+    fig.update_layout(**_pie_layout(f"Online vs Offline (Online = last seen ≤ {_online_window_label(age_hours_threshold)})"))
+    fig.update_layout(uniformtext_minsize=10, uniformtext_mode="hide")
+    return fig
+
+
+def status_type_donut(rt_df: pd.DataFrame) -> go.Figure:
+    if rt_df is None or rt_df.empty:
+        return EMPTY_FIG
+    counts = rt_df["StatusType"].fillna("Status Unknown").value_counts()
+    fig = px.pie(names=counts.index, values=counts.values, hole=0.6)
+    fig.update_traces(textposition="inside", textinfo="percent+label", marker=dict(line=dict(color="#FFFFFF", width=2)))
+    fig.update_layout(**_pie_layout("Detailed StatusType distribution"))
+    fig.update_layout(uniformtext_minsize=10, uniformtext_mode="hide")
+    return fig
+
+
+# Module health
+
+MODULE_COLS = ["MobileNetwork", "GPSModule", "GsensorModule", "WifiModule", "NotRecordingFlag"]
+MODULE_LABELS = {
+    "MobileNetwork": "Mobile",
+    "GPSModule": "GPS",
+    "GsensorModule": "G-Sensor",
+    "WifiModule": "Wi-Fi",
+    "NotRecordingFlag": "Video lost (ch)",
+}
+
+
+def module_health_bar(rt_df: pd.DataFrame) -> go.Figure:
+    if rt_df is None or rt_df.empty:
+        return EMPTY_FIG
+
+    rows: list[dict] = []
+    for col in MODULE_COLS:
+        if col not in rt_df.columns:
+            continue
+        s = rt_df[col].fillna("Unknown")
+        for state, n in s.value_counts().items():
+            rows.append({"Module": MODULE_LABELS[col], "State": state or "Unknown", "Count": int(n)})
+
+    if not rows:
+        return EMPTY_FIG
+
+    df = pd.DataFrame(rows)
+    fig = px.bar(
+        df,
+        x="Module",
+        y="Count",
+        color="State",
+        barmode="stack",
+        color_discrete_map={"Working": "#2E8B57", "Not Working": DHL_RED, "Unknown": "#999"},
+    )
+    fig.update_layout(**_bar_layout("Module health (Working vs Not Working)", showlegend=True))
+    return fig
+
+
+# Camera channels
+
+def channel_health_bar(
+    rt_df: pd.DataFrame, *, channels: Iterable[int] | None = None
+) -> go.Figure:
+    """Per channel CH1..CH3: Working / Video lost (``videoloststateFormatter``) / Camera covered (mask)."""
+    if channels is None:
+        channels = tuple(range(1, RT_VIDEO_LOST_CHANNEL_MAX + 1))
+    if rt_df is None or rt_df.empty:
+        return EMPTY_FIG
+
+    if "videoloststateFormatter" in rt_df.columns:
+        _vl = rt_df["videoloststateFormatter"].astype(str)
+    else:
+        _vl = pd.Series([""] * len(rt_df), index=rt_df.index)
+    if "videomaskstateFormatter" in rt_df.columns:
+        _mk = rt_df["videomaskstateFormatter"].astype(str)
+    else:
+        _mk = pd.Series([""] * len(rt_df), index=rt_df.index)
+    video_lost_lists = _vl.apply(parse_channels)
+    masked_lists = _mk.apply(parse_channels)
+
+    rows = []
+    for ch in channels:
+        video_lost = sum(ch in s for s in video_lost_lists)
+        masked = sum(ch in s for s in masked_lists)
+        total = len(rt_df)
+        any_problem = sum((ch in vl) or (ch in mk) for vl, mk in zip(video_lost_lists, masked_lists))
+        working = max(0, total - any_problem)
+        rows.append({"Channel": f"CH{ch}", "State": "Working", "Count": working})
+        rows.append({"Channel": f"CH{ch}", "State": "Video lost", "Count": video_lost})
+        rows.append({"Channel": f"CH{ch}", "State": "Camera covered", "Count": masked})
+
+    df = pd.DataFrame(rows)
+    df = df[df["Count"] > 0]
+    if df.empty:
+        return EMPTY_FIG
+
+    fig = px.bar(
+        df,
+        x="Channel",
+        y="Count",
+        color="State",
+        barmode="stack",
+        color_discrete_map={
+            "Working": "#2E8B57",
+            "Video lost": "#FF8C00",
+            "Camera covered": DHL_YELLOW,
+        },
+    )
+    fig.update_layout(**_bar_layout("Camera channel health (video lost vs covered, per device)", showlegend=True))
+    return fig
+
+
+def age_hours_histogram(rt_df: pd.DataFrame) -> go.Figure:
+    if rt_df is None or rt_df.empty:
+        return EMPTY_FIG
+    s = pd.to_numeric(rt_df.get("AgeHours"), errors="coerce").dropna()
+    if s.empty:
+        return EMPTY_FIG
+    fig = px.histogram(s, nbins=40, color_discrete_sequence=[DHL_RED])
+    fig.update_layout(
+        **_bar_layout(
+            "How stale is the latest status? (hours since last report)",
+            x_title="Age (hours)",
+            y_title="Devices",
+        ),
+    )
+    return fig
+
+
+def signal_box_by_status(rt_df: pd.DataFrame) -> go.Figure:
+    if rt_df is None or rt_df.empty or "signalValue" not in rt_df.columns:
+        return EMPTY_FIG
+    df = rt_df.dropna(subset=["signalValue"]).copy()
+    df["signalValue"] = pd.to_numeric(df["signalValue"], errors="coerce")
+    df = df.dropna(subset=["signalValue"])
+    if df.empty:
+        return EMPTY_FIG
+    fig = px.box(df, x="StatusType", y="signalValue", color="StatusType", points="suspectedoutliers")
+    fig.update_layout(**_bar_layout("Mobile signal by StatusType"))
+    return fig
+
+
+def top_fleets_by_faults(rt_df: pd.DataFrame, *, age_hours_threshold: float, top_n: int = 10) -> go.Figure:
+    if rt_df is None or rt_df.empty:
+        return EMPTY_FIG
+    age = pd.to_numeric(rt_df.get("AgeHours"), errors="coerce")
+    faulty = rt_df[(rt_df["StatusType"].fillna("") != "Normal") | (age > age_hours_threshold)].copy()
+    if faulty.empty:
+        return EMPTY_FIG
+    counts = faulty["Fleet"].fillna("Unknown").value_counts().head(top_n)
+    fig = px.bar(x=counts.values, y=counts.index, orientation="h", color_discrete_sequence=[DHL_RED])
+    fig.update_layout(
+        **_bar_layout(
+            f"Top {top_n} fleets by faulty devices",
+            x_title="Devices with fault",
+        ),
+    )
+    fig.update_yaxes(autorange="reversed")
+    return fig
+
+
+# Alarms
+
+def alarm_type_pie(alarms_df: pd.DataFrame) -> go.Figure:
+    if alarms_df is None or alarms_df.empty:
+        return EMPTY_FIG
+    counts = alarms_df["AlarmName"].fillna("Unknown").value_counts()
+    fig = px.pie(names=counts.index, values=counts.values, hole=0.45)
+    fig.update_traces(textposition="inside", textinfo="percent+label", marker=dict(line=dict(color="#FFFFFF", width=2)))
+    fig.update_layout(**_pie_layout("Alarms by type (last 24h)"))
+    fig.update_layout(uniformtext_minsize=10, uniformtext_mode="hide")
+    return fig
+
+
+def alarms_per_hour_line(alarms_df: pd.DataFrame) -> go.Figure:
+    if alarms_df is None or alarms_df.empty:
+        return EMPTY_FIG
+    df = alarms_df.dropna(subset=["AlarmTime"]).copy()
+    if df.empty:
+        return EMPTY_FIG
+    df["Hour"] = df["AlarmTime"].dt.floor("h")
+    grouped = df.groupby(["Hour", "AlarmName"]).size().reset_index(name="Count")
+    fig = px.area(grouped, x="Hour", y="Count", color="AlarmName")
+    fig.update_layout(**_bar_layout("Alarms per hour (last 24h)", x_title="Hour", y_title="Alarms", showlegend=True))
+    return fig
+
+
+def high_critical_assets_panel(assets_df: pd.DataFrame, *, per_group: int = 12) -> str:
+    """Two-column High / Critical ranking — readable names, no packed Plotly labels."""
+    empty = (
+        '<div class="hc-board">'
+        '<div class="hc-board-head"><h3 class="hc-board-title">Assets with High and Critical alerts</h3></div>'
+        '<p class="muted-msg">No High or Critical assets match the current filters.</p>'
+        "</div>"
+    )
+    if assets_df is None or assets_df.empty or "Severity" not in assets_df.columns:
+        return empty
+
+    df = assets_df.copy()
+    df = df[df["Severity"].astype(str).isin(["High", "Critical"])]
+    if df.empty:
+        return empty
+
+    if "Events" in df.columns:
+        df["Events"] = pd.to_numeric(df["Events"], errors="coerce").fillna(1).clip(lower=1)
+    else:
+        df["Events"] = 1
+    names = df["DeviceName"].fillna("").astype(str).str.strip() if "DeviceName" in df.columns else pd.Series("", index=df.index)
+    ids = df["DeviceID"].fillna("").astype(str) if "DeviceID" in df.columns else pd.Series("", index=df.index)
+    df["Name"] = names.where(names.ne(""), ids)
+    n_crit = int((df["Severity"] == "Critical").sum())
+    n_high = int((df["Severity"] == "High").sum())
+    peak = float(df["Events"].max() or 1)
+
+    def _rows(severity: str) -> str:
+        part = df[df["Severity"] == severity].sort_values("Events", ascending=False).head(per_group)
+        if part.empty:
+            return '<p class="hc-empty">None</p>'
+        items: list[str] = []
+        for i, row in enumerate(part.itertuples(index=False), start=1):
+            name = escape(str(getattr(row, "Name", "") or ""))
+            did = escape(str(getattr(row, "DeviceID", "") or ""))
+            kinds = escape(str(getattr(row, "AlertKinds", "") or ""))
+            fleet = escape(str(getattr(row, "Fleet", "") or ""))
+            events = int(getattr(row, "Events", 1) or 1)
+            width = max(8, round(100 * events / peak))
+            href = f"/dashboard/device?device_id={quote(str(getattr(row, 'DeviceID', '') or ''), safe='')}"
+            tone = "critical" if severity == "Critical" else "high"
+            meta = " · ".join(x for x in (fleet, kinds) if x)
+            items.append(
+                "<li class='hc-item'>"
+                f"<span class='hc-rank'>{i}</span>"
+                "<div class='hc-main'>"
+                f"<a class='hc-name' href='{href}' title='{name} ({did})'>{name}</a>"
+                f"<div class='hc-bar-track'><span class='hc-bar {tone}' style='width:{width}%'></span></div>"
+                f"<p class='hc-kinds'>{meta}</p>"
+                "</div>"
+                f"<span class='hc-count'>{events}</span>"
+                "</li>"
+            )
+        more = int((df["Severity"] == severity).sum()) - len(part)
+        extra = f"<p class='hc-more'>+{more} more</p>" if more > 0 else ""
+        return "<ol class='hc-list'>" + "".join(items) + "</ol>" + extra
+
+    return (
+        '<div class="hc-board">'
+        '<div class="hc-board-head">'
+        '<div>'
+        '<h3 class="hc-board-title">Assets with High and Critical alerts</h3>'
+        f'<p class="hc-board-meta">{n_crit} Critical · {n_high} High · ranked by watchlist events</p>'
+        "</div>"
+        '<div class="hc-board-legend">'
+        '<span><i class="hc-swatch critical"></i> Critical</span>'
+        '<span><i class="hc-swatch high"></i> High</span>'
+        "</div>"
+        "</div>"
+        '<div class="hc-cols">'
+        '<section class="hc-col">'
+        f'<h4 class="hc-col-title critical">Critical · {n_crit}</h4>'
+        f"{_rows('Critical')}"
+        "</section>"
+        '<section class="hc-col">'
+        f'<h4 class="hc-col-title high">High · {n_high}</h4>'
+        f"{_rows('High')}"
+        "</section>"
+        "</div>"
+        "</div>"
+    )
+
+
+def top_devices_by_alarms(alarms_df: pd.DataFrame, *, top_n: int = 20) -> go.Figure:
+    if alarms_df is None or alarms_df.empty:
+        return EMPTY_FIG
+    counts = (
+        alarms_df.groupby(["DeviceName", "DeviceID"]).size().reset_index(name="Alarms")
+        .sort_values("Alarms", ascending=False).head(top_n)
+    )
+    if counts.empty:
+        return EMPTY_FIG
+    counts["Label"] = counts["DeviceName"].fillna("") + "  (" + counts["DeviceID"].astype(str) + ")"
+    fig = px.bar(counts, x="Alarms", y="Label", orientation="h", color_discrete_sequence=[DHL_RED])
+    fig.update_layout(
+        **_bar_layout(
+            f"Top {top_n} devices by alarm count",
+            x_title="Alarms",
+        ),
+    )
+    fig.update_yaxes(autorange="reversed", tickfont=dict(size=11))
+    return fig
+
+
+def fleet_alarm_heatmap(alarms_df: pd.DataFrame) -> go.Figure:
+    if alarms_df is None or alarms_df.empty:
+        return EMPTY_FIG
+    pivot = (
+        alarms_df.groupby(["Fleet", "AlarmName"]).size().reset_index(name="Count")
+        .pivot(index="Fleet", columns="AlarmName", values="Count").fillna(0)
+    )
+    if pivot.empty:
+        return EMPTY_FIG
+    pivot = pivot.loc[pivot.sum(axis=1).sort_values(ascending=False).head(25).index]
+    fig = px.imshow(
+        pivot.values,
+        x=list(pivot.columns),
+        y=list(pivot.index),
+        color_continuous_scale="Reds",
+        aspect="auto",
+        text_auto=True,
+    )
+    fig.update_layout(**_bar_layout("Fleet × Alarm Type (heatmap)", showlegend=False))
+    return fig
+
+
+def mix_positions_map(pos_df: pd.DataFrame) -> go.Figure:
+    if pos_df is None or pos_df.empty:
+        return EMPTY_FIG
+    df = pos_df.copy()
+    df["Lat"] = pd.to_numeric(df.get("Latitude"), errors="coerce")
+    df["Lon"] = pd.to_numeric(df.get("Longitude"), errors="coerce")
+    df["SpeedKmhNum"] = pd.to_numeric(df.get("SpeedKmh"), errors="coerce")
+    df = df.dropna(subset=["Lat", "Lon"])
+    df = df[(df["Lat"].between(-90, 90)) & (df["Lon"].between(-180, 180))]
+    if df.empty:
+        return EMPTY_FIG
+
+    label = df.get("AssetName", pd.Series(dtype=str)).astype(str)
+    reg = df.get("Registration", pd.Series(dtype=str)).astype(str)
+    df["MapLabel"] = label.where(label.str.strip().ne(""), reg)
+
+    fig = px.scatter_map(
+        df,
+        lat="Lat",
+        lon="Lon",
+        color="SpeedKmhNum",
+        hover_name="MapLabel",
+        hover_data={
+            "Registration": True,
+            "Address": True,
+            "SpeedKmh": True,
+            "Rpm": True,
+            "EventTime": True,
+            "Lat": False,
+            "Lon": False,
+            "MapLabel": False,
+            "SpeedKmhNum": False,
+        },
+        zoom=5,
+    ) if hasattr(px, "scatter_map") else px.scatter_mapbox(
+        df,
+        lat="Lat",
+        lon="Lon",
+        color="SpeedKmhNum",
+        hover_name="MapLabel",
+        hover_data={
+            "Registration": True,
+            "Address": True,
+            "SpeedKmh": True,
+            "Rpm": True,
+            "EventTime": True,
+            "Lat": False,
+            "Lon": False,
+            "MapLabel": False,
+            "SpeedKmhNum": False,
+        },
+        zoom=5,
+    )
+    layout = dict(DEFAULT_LAYOUT)
+    layout.update(_AXIS_LAYOUT)
+    layout.update(
+        title=_chart_title("MiX asset locations (tacho speed)"),
+        map_style="open-street-map" if hasattr(px, "scatter_map") else None,
+        mapbox_style="open-street-map" if not hasattr(px, "scatter_map") else None,
+        height=600,
+        margin=dict(l=0, r=0, t=64, b=0),
+    )
+    fig.update_layout(**layout)
+    return fig
+
+
+def alarm_map(alarms_df: pd.DataFrame) -> go.Figure:
+    if alarms_df is None or alarms_df.empty:
+        return EMPTY_FIG
+    df = alarms_df.dropna(subset=["Lat", "Lon"]).copy()
+    df = df[(df["Lat"].between(-90, 90)) & (df["Lon"].between(-180, 180))]
+    if df.empty:
+        return EMPTY_FIG
+
+    fig = px.scatter_map(
+        df,
+        lat="Lat",
+        lon="Lon",
+        color="AlarmName",
+        hover_name="DeviceName",
+        hover_data={"AlarmTime": True, "Fleet": True, "Speed": True, "Lat": False, "Lon": False},
+        zoom=5,
+    ) if hasattr(px, "scatter_map") else px.scatter_mapbox(
+        df,
+        lat="Lat",
+        lon="Lon",
+        color="AlarmName",
+        hover_name="DeviceName",
+        hover_data={"AlarmTime": True, "Fleet": True, "Speed": True, "Lat": False, "Lon": False},
+        zoom=5,
+    )
+    layout = dict(DEFAULT_LAYOUT)
+    layout.update(_AXIS_LAYOUT)
+    layout.update(
+        title=_chart_title("Alarm locations (last 24h)"),
+        map_style="open-street-map" if hasattr(px, "scatter_map") else None,
+        mapbox_style="open-street-map" if not hasattr(px, "scatter_map") else None,
+        height=600,
+        margin=dict(l=0, r=0, t=64, b=0),
+    )
+    fig.update_layout(**layout)
+    return fig
+
+
+# Driver behaviour (Track3 + MiX)
+
+def behaviour_per_asset_bar(
+    per_asset: pd.DataFrame,
+    *,
+    window_label: str,
+    top_n: int = 15,
+) -> go.Figure:
+    """Stacked per-vehicle counts for the worst offenders."""
+    from behaviour import BEHAVIOUR_COLORS, BEHAVIOURS
+
+    if per_asset is None or per_asset.empty:
+        return EMPTY_FIG
+    top = per_asset.head(max(1, top_n)).iloc[::-1]
+    fig = go.Figure()
+    for behaviour in BEHAVIOURS:
+        if behaviour not in top.columns:
+            continue
+        fig.add_bar(
+            y=top["Asset"],
+            x=top[behaviour],
+            name=behaviour,
+            orientation="h",
+            marker_color=BEHAVIOUR_COLORS.get(behaviour, CHART_SLATE),
+        )
+    layout = _bar_layout(
+        f"Worst {min(len(per_asset), top_n)} vehicles by violations ({window_label})",
+        x_title="Violations",
+        showlegend=True,
+    )
+    layout["margin"] = dict(l=220, r=28, t=72, b=56)
+    layout["height"] = max(360, 26 * len(top) + 140)
+    fig.update_layout(**layout, barmode="stack")
+    return fig
+
+
+def behaviour_mix_donut(counts: dict[str, int], *, window_label: str) -> go.Figure:
+    from behaviour import BEHAVIOUR_COLORS
+
+    present = {k: v for k, v in (counts or {}).items() if v}
+    if not present:
+        return EMPTY_FIG
+    fig = px.pie(
+        names=list(present.keys()),
+        values=list(present.values()),
+        hole=0.58,
+        color=list(present.keys()),
+        color_discrete_map=BEHAVIOUR_COLORS,
+    )
+    fig.update_traces(
+        textposition="inside",
+        textinfo="percent+label",
+        marker=dict(line=dict(color="#FFFFFF", width=2)),
+    )
+    fig.update_layout(**_pie_layout(f"Violation mix ({window_label})"))
+    fig.update_layout(uniformtext_minsize=10, uniformtext_mode="hide")
+    return fig
+
+
+def behaviour_trend_line(df: pd.DataFrame, *, window_label: str) -> go.Figure:
+    """Violations per hour, one line per behaviour."""
+    from behaviour import BEHAVIOUR_COLORS, BEHAVIOURS
+
+    if df is None or df.empty or "Start" not in df.columns:
+        return EMPTY_FIG
+    work = df.copy()
+    work["Start"] = pd.to_datetime(work["Start"], errors="coerce", utc=True)
+    work = work.dropna(subset=["Start"])
+    if work.empty:
+        return EMPTY_FIG
+    work["Hour"] = work["Start"].dt.floor("h")
+    grouped = work.groupby(["Hour", "Behaviour"])["Count"].sum().reset_index()
+    fig = go.Figure()
+    for behaviour in BEHAVIOURS:
+        part = grouped[grouped["Behaviour"] == behaviour]
+        if part.empty:
+            continue
+        fig.add_scatter(
+            x=part["Hour"],
+            y=part["Count"],
+            mode="lines+markers",
+            name=behaviour,
+            line=dict(color=BEHAVIOUR_COLORS.get(behaviour, CHART_SLATE), width=2),
+        )
+    fig.update_layout(
+        **_bar_layout(
+            f"Violations per hour ({window_label})",
+            x_title="Hour (UTC)",
+            y_title="Violations",
+            showlegend=True,
+        )
+    )
+    return fig
+
+
+def behaviour_source_bar(df: pd.DataFrame, *, window_label: str) -> go.Figure:
+    """Where each behaviour was detected — Track3 eco-driving vs MiX events."""
+    from behaviour import BEHAVIOURS
+
+    if df is None or df.empty:
+        return EMPTY_FIG
+    grouped = df.groupby(["Behaviour", "Source"])["Count"].sum().reset_index()
+    if grouped.empty:
+        return EMPTY_FIG
+    fig = go.Figure()
+    for source, color in (("Track3", BRAND_PRIMARY), ("MiX", BRAND_SECONDARY)):
+        part = grouped[grouped["Source"] == source]
+        if part.empty:
+            continue
+        ordered = part.set_index("Behaviour").reindex(BEHAVIOURS).fillna(0)
+        fig.add_bar(x=ordered.index, y=ordered["Count"], name=source, marker_color=color)
+    fig.update_layout(
+        **_bar_layout(
+            f"Violations by platform ({window_label})",
+            y_title="Violations",
+            showlegend=True,
+        ),
+        barmode="group",
+    )
+    return fig
+
+
+def behaviour_map(df: pd.DataFrame, *, window_label: str) -> go.Figure:
+    from behaviour import BEHAVIOUR_COLORS
+
+    if df is None or df.empty:
+        return EMPTY_FIG
+    work = df.copy()
+    work["Latitude"] = pd.to_numeric(work["Latitude"], errors="coerce")
+    work["Longitude"] = pd.to_numeric(work["Longitude"], errors="coerce")
+    work = work.dropna(subset=["Latitude", "Longitude"])
+    work = work[work["Latitude"].between(-90, 90) & work["Longitude"].between(-180, 180)]
+    work = work[(work["Latitude"] != 0) | (work["Longitude"] != 0)]
+    if work.empty:
+        return EMPTY_FIG
+    scatter = px.scatter_map if hasattr(px, "scatter_map") else px.scatter_mapbox
+    fig = scatter(
+        work,
+        lat="Latitude",
+        lon="Longitude",
+        color="Behaviour",
+        color_discrete_map=BEHAVIOUR_COLORS,
+        hover_name="Asset",
+        hover_data={"RawEvent": True, "Start": True, "MaxSpeedKph": True, "Latitude": False, "Longitude": False},
+        zoom=5,
+    )
+    layout = dict(DEFAULT_LAYOUT)
+    layout.update(
+        title=_chart_title(f"Where violations happened ({window_label})"),
+        map_style="open-street-map" if hasattr(px, "scatter_map") else None,
+        mapbox_style="open-street-map" if not hasattr(px, "scatter_map") else None,
+        height=560,
+        margin=dict(l=0, r=0, t=64, b=0),
+    )
+    fig.update_layout(**layout)
+    return fig
+
+
+# Track3 fleet status
+
+def track3_status_pie(units_df: pd.DataFrame, *, online_minutes: int) -> go.Figure:
+    if units_df is None or units_df.empty or "Status" not in units_df.columns:
+        return EMPTY_FIG
+    counts = units_df["Status"].fillna("Unknown").value_counts()
+    counts = counts[counts > 0]
+    if counts.empty:
+        return EMPTY_FIG
+    fig = px.pie(
+        names=counts.index,
+        values=counts.values,
+        hole=0.55,
+        color=counts.index,
+        color_discrete_map={"Online": "#2E8B57", "Offline": DHL_RED, "Unknown": "#999"},
+    )
+    fig.update_traces(
+        textposition="inside",
+        textinfo="percent+label",
+        marker=dict(line=dict(color="#FFFFFF", width=2)),
+    )
+    fig.update_layout(**_pie_layout(f"Track3 units reporting (Online = message ≤ {online_minutes} min)"))
+    return fig
+
+
+def track3_age_histogram(units_df: pd.DataFrame) -> go.Figure:
+    if units_df is None or units_df.empty or "AgeMinutes" not in units_df.columns:
+        return EMPTY_FIG
+    ages = pd.to_numeric(units_df["AgeMinutes"], errors="coerce").dropna()
+    if ages.empty:
+        return EMPTY_FIG
+    hours = (ages / 60.0).clip(upper=48)
+    fig = px.histogram(x=hours, nbins=24, color_discrete_sequence=[BRAND_PRIMARY])
+    fig.update_layout(
+        **_bar_layout(
+            "Time since last Track3 message (hours, capped at 48)",
+            x_title="Hours since last message",
+            y_title="Units",
+        )
+    )
+    return fig

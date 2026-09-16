@@ -1,0 +1,2199 @@
+/**
+ * HowenVssVideoPlayer 视频播放器模块
+ * @param ele 当前节点tr
+ * @param wincount 初始化窗口数量
+ * @param showTool 是否显示工具栏（分窗口数量/全部暂停...）
+ * @param showontrol 是否控制栏
+ * @param storageWinCount 是否存储video窗口展示数量
+ * @param layero layer.open弹窗返回的dom对象，目前用于兼容AI标定功能
+ */
+function HowenVideoPlayer(ele, wincount, showTool, isOpenSound, showontrol, selectedChange, storageWinCount, layero) {
+    // 获取 文件名
+    let htmlName = window.location.pathname.match(/\/(\S*)\./)[1]
+    // 本地存储的窗口展示数量
+    let winCountName = htmlName + '_windowsCount'
+    let localWincount = Number(localStorage.getItem(winCountName));
+    // 优先使用本地存储的 窗口展示数量
+    this.windowsCount = localWincount ? localWincount : wincount > 0 ? wincount : 4;
+    this.showTool = showTool === false ? false : true;
+    this.showontrol = showontrol === false ? false : true
+    this.isOpenSound = isOpenSound === true ? true : false;
+    this.storageWinCount = storageWinCount === true ? true : false;
+    try {
+        this.log = new Logger("HowenVideoPlayer");
+    } catch (err) { }
+    this.ele = ele;
+    this.vediowindows = [];
+    this.devices = [];
+    this.httpsPortMaxCount = 800;
+    this.httpsPorts = [];
+    this.cameraData = "";
+    this.loop = false;
+    this.layero=layero;
+    /*
+    未知	0
+    视频预览	1
+    设备音频监听	2
+    设备双向对讲	3
+    设备录像回放	4
+    设备录像联动回放	5
+    设备录像下载 	6
+    设备图片下载	7    HTTP
+    设备音频文件下载	8    未找到设备支持语言文件       
+    语音广播    9
+    设备录像搜索	300
+    设备图片搜索	301    HTTP 
+    设备日志搜索	302
+    设备音频文件搜索	303
+    设备日志下载	304
+    设备升级	305
+    重启设备	306
+    复位设备	307
+    断油	308
+    断油恢复	309
+    断电	310
+    断电恢复	311
+    G-sensor校准	312
+    发送文字到设备	313   HTTP 
+    云台控制	314
+    设备抓拍指令	315
+    下发电子围栏	316   HTTP 
+    设备参数配置	317
+    */
+    this.bussType = 0;
+    //设置缓存时间 
+    //读取配置里的，如果配置为空则为实时模式及缓存为0 默认流畅模式
+
+    this.mBufferTimeMs = localStorage.getItem('BufferTimeMs') ? localStorage.getItem('BufferTimeMs') : 2000;
+    this.PlayStream = localStorage.getItem('PlayStream') ? localStorage.getItem('PlayStream') : 0;
+    this.isBackPlay = false;
+    this.token = null;
+    this.selectedChange = selectedChange;
+    this.initData();
+    this.initHtml();
+    this.initVideoWindow();
+    this.initEvent();
+
+
+}
+
+HowenVideoPlayer.prototype = {
+    /**
+     * 初始化基础数据
+     */
+    initData: function () {
+        for (let index = 0; index < 16; index++) {
+            this.vediowindows.push({
+                id: "videoElement" + (index + 1),
+                isfree: true,
+                deviceno: "",
+                channel: -1,
+                url: "",
+                flvPlayer: null,
+                channelName: "",
+                serverip: "",
+                totalTime: 0,
+            });
+        }
+
+        this.httpsPorts = [{
+            port: "9987",
+            count: 0,
+        },
+        {
+            port: "9988",
+            count: 0,
+        },
+        {
+            port: "9989",
+            count: 0,
+        },
+        ];
+    },
+
+    /**
+     * 设置全局的Token
+     * @param {*} token Token
+     */
+    setToken: function (token) {
+        this.token = token;
+    },
+
+    /**
+     * 初始化Html
+     */
+    initHtml: function initHtml() {
+        if (!this.ele && this.ele == "") {
+            this.log.logError("No ele");
+        }
+
+        let $vedio_main = $('<div class="vedio_main"></div>');
+        let $tv_video = $(
+            '<div class="tv_video" id="tv_video" data-wincount="1" data-ismaxwin="false"></div>'
+        );
+        if (this.showTool) {
+            let $tv_control = $(" <div class='tv_control'></div>");
+            $tv_control.append(
+                '<span data-wincount="1"' +
+                'title="' +
+                (sessionStorage.getItem("SINGLE_SCREEN") || 'SINGLE_SCREEN') +
+                '"class="wincount win-loop iconfont tv_control_font tv_control_font_hover">&#xe603;</span>'
+            );
+            $tv_control.append(
+                '<span data-wincount="4"' +
+                'title="' +
+                (sessionStorage.getItem("FOUR_SCREENL") || 'FOUR_SCREENL') +
+                '"class="wincount win-loop iconfont tv_control_font tv_control_font_hover">&#xe604;</span>'
+            );
+            $tv_control.append(
+                '<span data-wincount="6"' +
+                'title="' +
+                (sessionStorage.getItem("SIX_SCREENL") || 'SIX_SCREENL') +
+                '"class="wincount win-loop iconfont tv_control_font tv_control_font_hover">&#xe602;</span>'
+            );
+            $tv_control.append(
+                '<span data-wincount="9"' +
+                'title="' +
+                (sessionStorage.getItem("NINE_SCREENL") || 'NINE_SCREENL') +
+                '"class="wincount win-loop iconfont tv_control_font tv_control_font_hover">&#xe605;</span>'
+            );
+            $tv_control.append(
+                '<span data-wincount="16"' +
+                'title="' +
+                (sessionStorage.getItem("SIXTEEN_SCREENL") || 'SIXTEEN_SCREENL') +
+                '"class="wincount win-loop iconfont tv_control_font tv_control_font_hover">&#xe606;</span>'
+            );
+
+            $tv_control.append(
+                '<span id="winFullscreen"' +
+                'title="' +
+                (sessionStorage.getItem("WIN_FULL_SCREEN") || 'FULL_SCREEN') +
+                '"class="iconfont tv_control_font tv_control_font_hover">&#xe6cc;</span>'
+            );
+            $tv_control.append(
+                '<span id="stopAll"' +
+                'title="' +
+                (sessionStorage.getItem("STOP_ALL") || 'STOP_ALL') +
+                '"class="iconfont win-loop tv_control_font tv_control_font_hover">&#xe6a3;</span>'
+            );
+
+            $tv_control.append(
+                '<span id="playAll"' +
+                'title="' +
+                (sessionStorage.getItem("PLAY_ALL") || 'PLAY_ALL') +
+                '"class="iconfont win-loop tv_control_font tv_control_font_hover">&#xe6b6;</span>'
+            );
+
+            $tv_control.append(
+                '<span id="pauseAll"' +
+                'title="' +
+                (sessionStorage.getItem("PAUSE_ALL") || 'PAUSE_ALL') +
+                '"class="iconfont win-loop tv_control_font tv_control_font_hover">&#xe619;</span>'
+            );
+
+            if (this.mBufferTimeMs == 2000) {
+                $tv_control.append(
+                    '<span ' +
+                    'title=" ' +
+                    (sessionStorage.getItem("SMOOTHFIRST")) +
+                    ' "  class="playmode win-loop iconfont tv_control_font tv_control_font_hover">&#xe672;</span>'
+                );
+            } else {
+
+                $tv_control.append(
+                    '<span ' +
+                    'title=" ' +
+                    (sessionStorage.getItem("REALFIRST")) +
+                    ' "  class="playmode win-loop iconfont tv_control_font tv_control_font_hover">&#xe6ce;</span>'
+                );
+
+            }
+            $vedio_main.append($tv_control[0]);
+        }
+        for (let index = 0; index < 16; index++) {
+            //视频具体信息的地方
+            let $tv_video_item_box_video = $('<div data-index="' + index + '" class="tv_video_item_box_video"></div>');
+
+            // 视频播放的地方
+            $tv_video_item_box_video.append(
+                '<video id="videoElement' + (index + 1) + '" autoplay muted="true"></video>'
+            );
+
+            //视频盒子
+            let $tv_video_item_box = $('<div data-index="' + index + '" class="tv_video_item_box"></div>');
+
+            $tv_video_item_box.append($tv_video_item_box_video[0]);
+            if (this.showontrol) {
+
+                let $tv_video_item_box_title = $('<div class="tv_video_item_box_title"></div>');
+
+                //停止按钮
+                $tv_video_item_box_title.append(
+                    "<span " +
+                    'title="' +
+                    (sessionStorage.getItem("STOP") || 'STOP') +
+                    '" style="font-size: 16px;" data-index="' +
+                    (index + 1) +
+                    '" class="iconfont tv_video_item_box_hd tv_video_stop">&#xe6a3;</span>'
+                );
+
+                //停止车队按钮
+                $tv_video_item_box_title.append(
+                    "<span " +
+                    'title="' +
+                    (sessionStorage.getItem("VEHICLE_STOP") || '关闭本车') +
+                    '" style="font-size: 16px;" data-index="' +
+                    (index + 1) +
+                    '" class="iconfont tv_video_item_box_hd tv_video_vehicle_stop"></span>'
+                );
+
+                //暂停按钮
+                $tv_video_item_box_title.append(
+                    "<span " +
+                    'title="' +
+                    (sessionStorage.getItem("PAUSE") || 'PAUSE') +
+                    '" style="font-size: 16px;" data-index="' +
+                    (index + 1) +
+                    '" class="iconfont tv_video_item_box_hd tv_video_pause">&#xe619;</span>'
+                );
+                //播放按钮
+                $tv_video_item_box_title.append(
+                    "<span " +
+                    'title="' +
+                    (sessionStorage.getItem("PLAY") || 'PLAY') +
+                    '" style="font-size: 16px;" data-index="' +
+                    (index + 1) +
+                    '" class="iconfont tv_video_item_box_hd tv_video_play">&#xe626;</span>'
+                );
+                //内容按钮
+                $tv_video_item_box_title.append('<div class="tv_video_item_box_ch"></div>');
+
+                //子/主码流
+                $tv_video_item_box_title.append(
+
+                    `<span 
+                        title="${(sessionStorage.getItem("MAIN_STREAM") || 'MAIN_STREAM')}" 
+                        style="font-size: 24px;${this.PlayStream == 1 ? 'display:none' : ''}"
+                        data-index="${(index + 1)}" 
+                        class="iconfont tv_video_item_box_hd tv_video_item_box_hd_main">&#xe616;</span>
+                    `
+
+                );
+
+
+
+                //子/主码流
+                $tv_video_item_box_title.append(
+
+                    `<span 
+                    title="${(sessionStorage.getItem("SUBSTREAM") || 'SUBSTREAM')}" 
+                    style="font-size: 24px;${this.PlayStream == 1 ? '' : 'display:none'}"                  
+                    data-index="${(index + 1)}" 
+                    class="iconfont tv_video_item_box_hd tv_video_item_box_hd_main_sub">&#xe615;</span>
+                    `
+
+                );
+
+                //声音 关
+                $tv_video_item_box_title.append(
+                    "<span " +
+                    'title="' +
+                    (sessionStorage.getItem("SOUND_COLSE") || 'SOUND_COLSE') +
+                    '" style="font-size: 16px;" data-index="' +
+                    (index + 1) +
+                    '"  class="iconfont tv_video_item_box_hd tv_video_item_sound_colse">&#xe601;</span>'
+                );
+
+                //声音 开
+                $tv_video_item_box_title.append(
+                    "<span " +
+                    'title="' +
+                    (sessionStorage.getItem("SOUND_OPEN") || 'SOUND_OPEN') +
+                    '" style="font-size: 16px; display:none" data-index="' +
+                    (index + 1) +
+                    '"  display:none" class="iconfont tv_video_item_box_hd tv_video_item_sound_open">&#xe609;</span>'
+                );
+
+
+
+
+
+                //一倍速
+                $tv_video_item_box_title.append(
+                    "<span " +
+                    'title="' +
+                    (sessionStorage.getItem("ONE_TIMES_SPEED") || 'ONE_TIMES_SPEED') +
+                    '" style="font-size: 24px;" data-speed="1" data-index="' +
+                    (index + 1) +
+                    '"  class="iconfont  tv_video_item_box_hd tv_video_speed tv_video_speed_1">&#xe67b;</span>'
+                );
+                //二倍速
+                $tv_video_item_box_title.append(
+                    "<span " +
+                    'title="' +
+                    (sessionStorage.getItem("TWO_TIMES_SPEED") || 'TWO_TIMES_SPEED') +
+                    '" style="font-size: 24px;display:none" data-speed="2" data-index="' +
+                    (index + 1) +
+                    '"  class="iconfont  tv_video_item_box_hd tv_video_speed">&#xe67a;</span>'
+                );
+                //四倍速
+                $tv_video_item_box_title.append(
+                    "<span " +
+                    'title="' +
+                    (sessionStorage.getItem("FOUR_TIMES_SPEED") || 'FOUR_TIMES_SPEED') +
+                    '" style="font-size: 24px;display:none" data-speed="4" data-index="' +
+                    (index + 1) +
+                    '"  class="iconfont  tv_video_item_box_hd tv_video_speed">&#xe67c;</span>'
+                );
+
+                //八倍速
+                $tv_video_item_box_title.append(
+                    "<span " +
+                    'title="' +
+                    (sessionStorage.getItem("EIGHT_TIMES_SPEED") || 'EIGHT_TIMES_SPEED') +
+                    '" style="font-size: 14px;display:none" data-speed="8" data-index="' +
+                    (index + 1) +
+                    '"  class="iconfont  tv_video_item_box_hd tv_video_speed">X8</span>'
+                );
+                //十六倍速
+                $tv_video_item_box_title.append(
+                    "<span " +
+                    'title="' +
+                    (sessionStorage.getItem("SIXTEEN_TIMES_SPEED") || 'SIXTEEN_TIMES_SPEED') +
+                    '" style="font-size: 14px;display:none" data-speed="16" data-index="' +
+                    (index + 1) +
+                    '"  class="iconfont  tv_video_item_box_hd tv_video_speed">X16</span>'
+                );
+
+                //声音  截屏
+                $tv_video_item_box_title.append(
+                    "<span " +
+                    'title="' +
+                    (sessionStorage.getItem("SCREENSHOT") || 'Screenshot') +
+                    '" style="font-size: 16px;" data-index="' +
+                    (index + 1) +
+                    '"  display:none" class="iconfont tv_video_item_box_hd tv_video_item_camera">&#xe967;</span>'
+                );
+
+
+                // 小窗口全屏
+                $tv_video_item_box_title.append(
+                    "<span " +
+                    'title="' +
+                    (sessionStorage.getItem("WIN_FULL_SCREEN") || 'WIN_FULL_SCREEN') +
+                    '" style="font-size: 16px;" data-index="' +
+                    (index + 1) +
+                    '"  class="iconfont  tv_video_item_box_hd tv_video_item_box_full">&#xe6cc;</span>'
+                );
+
+
+                $tv_video_item_box.append($tv_video_item_box_title[0]);
+            }
+
+
+
+            let $tv_video_item = $(
+                '<div class="tv_video_item_' + (index + 1) + ' tv_video_item"></div>'
+            );
+            $tv_video_item.append($tv_video_item_box[0]);
+
+            $tv_video.append($tv_video_item[0]);
+        }
+
+        $vedio_main.append($tv_video[0]);
+
+       // $(this.ele).append($vedio_main[0]);
+        if( this.layero != undefined ) {
+            this.layero.find(this.ele).append($vedio_main[0]);
+            this.layero.find(this.ele + " .tv_video_item_1").css("width", "100%");
+            this.layero.find(this.ele + " .tv_video_item_1").css("display", "");
+            this.layero.find(this.ele + " .tv_video_item_1").css("height", '100%');
+            this.layero.find(".tv_video_item_box_video").css(
+                "background",
+                "url(image/logo2.png) no-repeat center center"
+            );
+        }else{
+            $(this.ele).append($vedio_main[0]);
+        }
+
+        $(".tv_video_play").hide();
+        $(".tv_video_pause").hide();
+        $(".tv_video_speed").hide();
+        $(".tv_video_stop").hide();
+        $(".tv_video_vehicle_stop").hide();
+
+        if (this.PlayStream == 1) { //主码流
+            $(".tv_video_item_box_hd_main").hide();
+            $(".tv_video_item_box_hd_main_sub").show();
+
+
+        } else {
+            $(".tv_video_item_box_hd_main").show();
+            $(".tv_video_item_box_hd_main_sub").hide();
+        }
+        $(".tv_video_item_box_video").css(
+            "background",
+            "url(image/logo2.png) no-repeat center center"
+        );
+    },
+    /**
+     * 停止所有视频
+     */
+    stopAllVideo: function stopAllVideo() {
+        $(this.ele + " .tv_video_item_box_video").css("background", "");
+        $(this.ele + " .tv_video_pause").hide();
+        $(this.ele + " .tv_video_stop").hide();
+        $(this.ele + " .tv_video_vehicle_stop").hide();
+        $(this.ele + " .tv_video_item_box_ch").html("");
+        for (let index = 0; index < this.windowsCount; index++) {
+            this.vediowindows[index].isfree = true;
+            let flvPlayer = this.vediowindows[index].flvPlayer;
+            if (flvPlayer) {
+                try {
+                    flvPlayer.pause();
+                    flvPlayer.unload();
+                    flvPlayer.detachMediaElement();
+                    flvPlayer.destroy();
+                } catch (err) { }
+            }
+            if (this.vediowindows[index].iscanvas == true) {
+                let box = $(this.ele + "videoElement" + (index + 1)).parent();
+                box.html("");
+                box.append(
+                    '<video id="videoElement' + (index + 1) + '" autoplay muted="true"></video>'
+                );
+            }
+            this.vediowindows[index].iscanvas = false;
+            this.vediowindows[index].flvPlayer = null;
+            this.vediowindows[index].totalTime = 0;
+            this.vediowindows[index].url = '';
+        }
+        $(this.ele + " .tv_video_item_box_video").css(
+            "background",
+            "url(image/logo2.png) no-repeat center center"
+        );
+        //重置Https连接数量
+        this.httpsPorts.forEach((element) => {
+            element.count = 0;
+        });
+
+    },
+    /**
+     * 暂停所有视频
+     */
+    pauseAll: function () {
+        for (let index = 0; index < this.windowsCount; index++) {
+            this.vediowindows[index].isfree = true;
+            if (!this.vediowindows[index].flvPlayer) continue;
+            this.vediowindows[index].flvPlayer.pause();
+            if (this.vediowindows[index].channel != -1) {
+                $(this.ele + " .tv_video_item_" + (index + 1) + " .tv_video_play").show();
+            }
+        }
+        $(this.ele + " .tv_video_pause").hide();
+    },
+
+    /**
+     * 回放时，所有的回到一倍速
+     */
+    playBack_1x: function playBack_1x() {
+        $(this.ele + " .tv_video_speed").hide();
+    },
+    /**
+     * 初始化窗口数量
+     */
+    initVideoWindow: function (count) {
+        this.windowsCount = count > 0 ? count : this.windowsCount;
+        // 是否开启 video窗口展示数量 本地存储
+        if (this.storageWinCount) {
+            // 获取 文件名
+            let htmlName = window.location.pathname.match(/\/(\S*)\./)[1]
+            let storageName = htmlName + '_windowsCount'
+            localStorage.setItem(storageName, this.windowsCount);
+        }
+        //初始化窗口数量
+        $(this.ele + " .tv_video").css("display", "inline");
+        $(this.ele + " .tv_video_item").css("height", "");
+        $(this.ele + " .tv_video_item").css("width", "");
+        $(this.ele + " .tv_video_item").css("float", "");
+        $(this.ele + " .tv_video_item").css("display", "none");
+        $(this.ele + " .tv_video_item_4").css("clear", "");
+
+        let h = $(".tv_video").height();
+        let _h;
+
+        switch (this.windowsCount) {
+            case 1: //1 个窗口
+
+                //_h = h + "px";
+                _h = "100%";
+                $(this.ele + " .tv_video_item_1").css("width", "100%");
+                // $(".tv_video_item_1").css('float', '');
+                $(this.ele + " .tv_video_item_1").css("display", "");
+                $(this.ele + " .tv_video_item_1").css("height", _h);
+                //$(".tv_video").css('display', 'inline');
+                break;
+            case 4: // 4个窗口
+                //_h = h / 2 + "px";
+                _h = "50%";
+                $(this.ele + " .tv_video_item_1").css("display", "inline");
+                $(this.ele + " .tv_video_item_2").css("display", "inline");
+                $(this.ele + " .tv_video_item_3").css("display", "inline");
+                $(this.ele + " .tv_video_item_4").css("display", "inline");
+
+                $(this.ele + " .tv_video_item_1").css("height", _h);
+                $(this.ele + " .tv_video_item_1").css("width", "50%");
+                $(this.ele + " .tv_video_item_1").css("float", "left");
+
+                $(this.ele + " .tv_video_item_2").css("height", _h);
+                $(this.ele + " .tv_video_item_2").css("width", "50%");
+                $(".tv_video_item_2").css("float", "left");
+
+                $(this.ele + " .tv_video_item_3").css("height", _h);
+                $(this.ele + " .tv_video_item_3").css("width", "50%");
+                $(".tv_video_item_3").css("float", "left");
+
+                $(this.ele + " .tv_video_item_4").css("height", _h);
+                $(this.ele + " .tv_video_item_4").css("width", "50%");
+                $(this.ele + " .tv_video_item_4").css("float", "left");
+                break;
+            case 6: // 6个窗口
+                // _h = h / 3 + "px";
+                // let _h2 = 2 * (h / 3) + "px";
+
+                _h = "33.33%";
+                let _h2 = "66.66%";
+
+
+                $(this.ele + " .tv_video_item_1").css("display", "inline");
+                $(this.ele + " .tv_video_item_2").css("display", "inline");
+                $(this.ele + " .tv_video_item_3").css("display", "inline");
+                $(this.ele + " .tv_video_item_4").css("display", "inline");
+                $(this.ele + " .tv_video_item_5").css("display", "inline");
+                $(this.ele + " .tv_video_item_6").css("display", "inline");
+
+                $(this.ele + " .tv_video_item_1").css("height", _h2);
+                $(this.ele + " .tv_video_item_1").css("width", "66.66%");
+                $(this.ele + " .tv_video_item_1").css("float", "left");
+
+                $(this.ele + " .tv_video_item_2").css("height", _h);
+                $(this.ele + " .tv_video_item_2").css("width", "33.33%");
+                $(this.ele + " .tv_video_item_2").css("float", "left");
+
+                $(this.ele + " .tv_video_item_3").css("height", _h);
+                $(this.ele + " .tv_video_item_3").css("width", "33.33%");
+                $(this.ele + " .tv_video_item_3").css("float", "left");
+
+                $(this.ele + " .tv_video_item_4").css("height", _h);
+                $(this.ele + " .tv_video_item_4").css("width", "33.33%");
+                $(this.ele + " .tv_video_item_4").css("float", "left");
+                $(this.ele + " .tv_video_item_4").css("clear", "both");
+                $(this.ele + " .tv_video_item_4").css("float", "left");
+
+                $(this.ele + " .tv_video_item_5").css("height", _h);
+                $(this.ele + " .tv_video_item_5").css("width", "33.33%");
+                $(this.ele + " .tv_video_item_5").css("float", "left");
+
+                $(this.ele + " .tv_video_item_6").css("height", _h);
+                $(this.ele + " .tv_video_item_6").css("width", "33.33%");
+                $(this.ele + " .tv_video_item_6").css("float", "left");
+                break;
+            case 9: //9个窗口
+                //_h = h / 3 + "px";
+
+                _h = "33.33%";
+                $(this.ele + " .tv_video_item_1").css("display", "inline");
+                $(this.ele + " .tv_video_item_2").css("display", "inline");
+                $(this.ele + " .tv_video_item_3").css("display", "inline");
+                $(this.ele + " .tv_video_item_4").css("display", "inline");
+                $(this.ele + " .tv_video_item_5").css("display", "inline");
+                $(this.ele + " .tv_video_item_6").css("display", "inline");
+                $(this.ele + " .tv_video_item_7").css("display", "inline");
+                $(this.ele + " .tv_video_item_8").css("display", "inline");
+                $(this.ele + " .tv_video_item_9").css("display", "inline");
+
+                $(this.ele + " .tv_video_item_1").css("height", _h);
+                $(this.ele + " .tv_video_item_1").css("width", "33.33%");
+                $(this.ele + " .tv_video_item_1").css("float", "left");
+
+                $(this.ele + " .tv_video_item_2").css("height", _h);
+                $(this.ele + " .tv_video_item_2").css("width", "33.33%");
+                $(this.ele + " .tv_video_item_2").css("float", "left");
+
+                $(this.ele + " .tv_video_item_3").css("height", _h);
+                $(this.ele + " .tv_video_item_3").css("width", "33.33%");
+                $(this.ele + " .tv_video_item_3").css("float", "left");
+
+                $(this.ele + " .tv_video_item_4").css("height", _h);
+                $(this.ele + " .tv_video_item_4").css("width", "33.33%");
+                $(this.ele + " .tv_video_item_4").css("float", "left");
+
+                $(this.ele + " .tv_video_item_5").css("height", _h);
+                $(this.ele + " .tv_video_item_5").css("width", "33.33%");
+                $(this.ele + " .tv_video_item_5").css("float", "left");
+
+                $(this.ele + " .tv_video_item_6").css("height", _h);
+                $(this.ele + " .tv_video_item_6").css("width", "33.33%");
+                $(this.ele + " .tv_video_item_6").css("float", "left");
+
+                $(this.ele + " .tv_video_item_9").css("height", _h);
+                $(this.ele + " .tv_video_item_9").css("width", "33.33%");
+                $(this.ele + " .tv_video_item_9").css("float", "left");
+
+                $(this.ele + " .tv_video_item_7").css("height", _h);
+                $(this.ele + " .tv_video_item_7").css("width", "33.33%");
+                $(this.ele + " .tv_video_item_7").css("float", "left");
+
+                $(this.ele + " .tv_video_item_8").css("height", _h);
+                $(this.ele + " .tv_video_item_8").css("width", "33.33%");
+                $(this.ele + " .tv_video_item_8").css("float", "left");
+                break;
+            case 16: //16 窗口
+                // _h = h / 4 + "px";
+
+                _h = "25%";
+                $(this.ele + " .tv_video_item").css("display", "inline");
+                $(this.ele + " .tv_video_item").css("height", _h);
+                $(this.ele + " .tv_video_item").css("width", "25%");
+                $(this.ele + " .tv_video_item").css("float", "left");
+
+                break;
+            default:
+                break;
+        }
+    },
+    /**
+     * CH1的偏移量偏移量
+     */
+    getcurrentTimeForCH1: function (chIndex) {
+        if (!chIndex)
+            chIndex = 0;
+
+        let temp = this.vediowindows.find((d) => d.channel == parseInt(chIndex) + 1);
+        if (!temp || temp.isfree) {
+            return;
+        }
+        let {
+            iscanvas,
+            flvPlayer
+        } = temp;
+        if (iscanvas == false) return flvPlayer.currentTime;
+        else {
+            if (flvPlayer.OldTime) return flvPlayer.currentTime + flvPlayer.OldTime;
+            else return flvPlayer.currentTime;
+        }
+    },
+    /**
+     * 回放视频--自动下载服务器视频
+     * @param ipserver 服务器地址
+     * @param deviceID 设备编号
+     * @param chnum 通道
+     * @param startDateTime 无意义
+     * @param filename 设备编号
+     * @param devicename devicename
+     */
+    playBackAutoServerVideo: function playBackAutoServerVideo(
+        ipserver,
+        deviceID,
+        chnum,
+        startDateTime,
+        filename,
+        devicename
+    ) {
+
+        this.bussType = 0;
+        $(this.ele + " .tv_video_speed_1").show();
+        //var url = "${ipserver}/replay?${+new Date()}_${deviceID}_${chnum}_${btoa(filename)}";
+        var url =
+            ipserver +
+            "/replay?" +
+            (this.token || +new Date()) +
+            "_" +
+            deviceID +
+            "_" +
+            chnum +
+            "_" +
+            startDateTime +
+            "_" +
+            btoa(filename);
+
+        this._playVideo(url, deviceID, chnum, "CH" + chnum, ipserver, null, devicename);
+        $(this.ele + " #stopAll").show();
+        $(this.ele + " .tv_video_play").hide();
+    },
+
+
+    setLoop: function (loop) {
+        this.loop = loop;
+        if (loop) {
+            $('.win-loop').removeClass('tv_control_font_hover');
+        } else {
+            $('.win-loop').addClass('tv_control_font_hover');
+        }
+    },
+
+    /**
+     * 回放视频--录像服务器的视频
+     * @param {*} ipserver 
+     * @param {*} deviceID 
+     * @param {*} chnum 
+     * @param {*} filename 
+     * @param {*} file 
+     * @param {*} devicename 
+     * @param {*} offset 
+     * @returns 
+     */
+    slicerePlay: function (ipserver,
+        deviceID,
+        chnum,
+        file,
+        devicename,
+        offset) {
+        this.bussType = 0;
+
+        $(this.ele + " .tv_video_speed").hide(); //var url = filename;
+        let url = `${ipserver}/slicereplay?${(this.token || +new Date())}_${deviceID}_${chnum}_${offset}_${btoa(file)}`;
+
+        let res = this._playVideo(url, deviceID, chnum, 'CH' + chnum, ipserver, file, devicename);
+
+
+        $(this.ele + " #stopAll").show();
+        $(this.ele + " .tv_video_play").hide();
+        return res;
+    },
+
+
+
+    /**
+     * 回放视频--告警服务器视频
+     * @param ipserver 服务器地址
+     * @param deviceID 设备编号
+     * @param chnum 通道
+     * @param startDateTime 无意义
+     * @param filename 设备编号
+     */
+    playBackAlarmServerVideo: function playBackAlarmServerVideo(
+        ipserver,
+        deviceID,
+        chnum,
+        filename,
+        file, devicename
+    ) {
+        this.bussType = 0;
+
+        $(this.ele + " .tv_video_speed_1").show(); //var url = filename;
+
+        var url =
+            ipserver +
+            "/alarmreplay?" +
+            (this.token || +new Date()) +
+            "_" +
+            deviceID +
+            "_" +
+            chnum +
+            "_" +
+            btoa(file);
+
+
+        let res = this._playVideo(url, deviceID, chnum, 'CH' + chnum, ipserver, filename, devicename);
+        $(this.ele + " #stopAll").show();
+        $(this.ele + " .tv_video_play").hide();
+        return res;
+    },
+
+    /**
+     * 回放视频--设备视频
+     * @param ipserver 服务器地址
+     * @param deviceID 设备编号
+     * @param chnum 通道
+     * @param startDateTime 开始时间
+     * @param EndDateTime 开始结束时间
+     * @param speed 倍速 默认为1
+     * @param devicename devicename
+     */
+    playBackVideo: function playBackVideo(
+        ipserver,
+        deviceID,
+        chnum,
+        startDateTime,
+        EndDateTime,
+        speed,
+        devicename
+    ) {
+
+        this.isBackPlay = true;
+        this.bussType = 4;
+
+        $(this.ele + " .tv_video_speed_1").show();
+        // var url =
+        //     "${ipserver}/replay?${+new Date()}_${deviceID}_${chnum}_${startDateTime}_${EndDateTime}";
+        var url =
+            ipserver +
+            "/replay?" +
+            (this.token || +new Date()) +
+            "_" +
+            deviceID +
+            "_" +
+            chnum +
+            "_" +
+            startDateTime +
+            "_" +
+            EndDateTime;
+
+
+        this._playVideo(url, deviceID, chnum, "CH" + chnum, null, null, devicename);
+        $(this.ele + " #stopAll").show();
+        $(this.ele + " .tv_video_play").hide();
+    },
+    /**
+     * 挨个选择窗口播放视频
+     * @param url 播放地址
+     * @param deviceno 设备编号
+     * @param channel 通道
+     * @param channelName 通道名称
+     * @param ipserver 服务器地址
+     * @param filename 当为告警录像时，记录当前正在播放的文件名称
+     * @param devicename devicename
+     */
+    _playVideo: function (url, deviceno, channel, channelName, ipserver, filename, devicename) {
+
+        let res = false;
+
+        for (let index = 0; index < this.windowsCount; index++) {
+            if (this.vediowindows[index].isfree || (this.vediowindows[index].deviceno == deviceno && this.vediowindows[index].channel == channel)) {
+
+                if (!this.vediowindows[index].isfree) {
+                    this.stop(index);
+                }
+
+                this.vediowindows[index].url = url;
+                this.vediowindows[index].filename = filename;
+                this.vediowindows[index].devicename = devicename;
+                this.play(index, url, deviceno, channel, channelName, ipserver);
+                res = true;
+                break;
+            }
+        }
+        return res;
+    },
+
+    /**
+     * 这里更具当前的网络类型，是否需要将Http的连接转换为Https连接？
+     * @param {url} url 需要播放视频流地址
+     * @returns {url} 返回转换好的Url
+     */
+    changeHppts: function (url) {
+        let that = this;
+        let _url = url;
+        let index = that.httpsPorts.findIndex((d) => d.count < that.httpsPortMaxCount);
+        if (
+            window.location.protocol.toLowerCase() === "https:".toLowerCase() &&
+            _url.substring(_url.length - 4).toLowerCase() != ".mp4".toLowerCase()
+        ) {
+            if (_url.indexOf('alarmreplay') >= 0) {
+                _url = _url.replace("alarmreplay?", "flvRouter.php?alarmreplay?");
+            } else if (url.indexOf('slicereplay') >= 0) {
+                temp_url = url.replace("slicereplay?", "flvRouter.php?_bywasm_slicereplay?");
+            } else {
+                _url = _url.replace("live?", "flvRouter.php?live?");
+                _url = _url.replace("replay?", "flvRouter.php?replay?");
+                _url = _url.replace("fastReplay?", "flvRouter.php?fastReplay?");
+            }
+            let temp = _url.split(/[/,:]/);
+
+            if (index == -1) {
+                let error = "http port 使用完毕，无法创建新的";
+                that.log.logError(error);
+                throw error;
+            }
+
+            //let _urls = `https://${window.location.hostname}:${that.httpsPorts[index].port}`;
+            //let _urls = `https://172.16.50.210:${that.httpsPorts[index].port}`;
+            //_url = _urls + "/" + _url.split(/[/,:]/)[5];
+            //return _url;
+            _url = _url.replace("http:", "https:");
+
+
+        } else if (
+            window.location.protocol.toLowerCase() === "https:".toLowerCase() &&
+            _url.substring(_url.length - 4).toLowerCase() == ".mp4".toLowerCase()
+        ) {
+            _url = _url.replace("http:", "https:");
+        }
+        that.httpsPorts[index].count += 1;
+        return _url;
+    },
+    /**
+     * 窗口播放视频 先用FLVjs播放，如果FLVjs不行，就采用WebGL方式
+     * @param index 播放地址
+     * @param url 播放地址
+     * @param deviceno 设备编号
+     * @param channel 通道
+     * @param channelName 通道名称
+     * @param ipserver 服务器地址
+     * @param hasAudio 是否包含音频
+     * @param isSpeed 回放倍速
+     */
+    play: function (index, url, deviceno, channel, channelName, ipserver, hasAudio, isSpeed) {
+        let that = this;
+        this.bussType = 1;
+        url = that.changeHppts(url);
+
+        if (!hasAudio && hasAudio != false) {
+            hasAudio = true;
+        }
+
+        let type = "flv";
+        if (url.indexOf(".mp4") >= 0) {
+            type = "mp4";
+        }
+
+        var flvPlayer = null;
+
+        function canvasPlay() {
+            
+            if( that.layero != undefined ) {
+                let box = that.layero.find('#videoElement1').parent();
+                let h = box.height();
+                let w = box.width();
+                box.html("");
+                box.append(
+                    `<canvas id="videoElement1" width="${w}" height="${h}" autoplay muted="true"></canvas>`
+                );
+            }else {
+                let box = $(that.ele + " #videoElement" + (index + 1)).parent();
+                let h = box.height();
+                let w = box.width();
+                box.html("");
+                box.append(
+                    `<canvas id="${that.ele.replace('#', '')}videoElement${index + 1
+                    }" width="${w}" height="${h}" autoplay muted="true"></canvas>`
+                );
+            }
+
+            let temp_url = '';
+            if (url.indexOf('alarmreplay') >= 0) {
+                temp_url = url.replace("alarmreplay?", "_bywasm_alarmreplay?");
+            } else if (url.indexOf('slicereplay') >= 0) {
+                temp_url = url.replace("slicereplay?", "_bywasm_slicereplay?");
+            } else {
+                temp_url = url.replace("live?", "_bywasm_live?");
+                temp_url = temp_url.replace("replay?", "_bywasm_replay?");
+                temp_url = temp_url.replace("fastReplay?", "_bywasm_fastReplay?");
+            }
+
+            let video = document.getElementById(that.ele.replace('#', '') + "videoElement" + (index + 1));
+
+            if( that.layero != undefined ) {
+                video = that.layero.find('#videoElement1')[0];
+            }
+
+            // 暂时未适配APP端
+            // 0就是啥都不是的那种
+            if (that.bussType == 0 || !sessionStorage.getItem('user'))
+                flvPlayer = new CanvasPlayer(video, temp_url);
+            else {
+                let username = JSON.parse(sessionStorage.getItem('user')).username;
+                flvPlayer = new CanvasPlayer(video, temp_url, {
+                    username,
+                    bussType: that.bussType
+                });
+            }
+
+            //设置缓存时间，当为回放且为快进的时候就不开启缓存
+            if (!isSpeed || isSpeed <= 1)
+                flvPlayer.setBufferTimeMs(that.mBufferTimeMs);
+
+            flvPlayer.play();
+            if (that.isOpenSound) {
+                flvPlayer.openAudio(true);
+            }
+            that.vediowindows[index].flvPlayer = flvPlayer;
+            that.vediowindows[index].iscanvas = true;
+            $(that.ele + " .tv_video_item_" + (index + 1) + " .tv_video_item_box_video").css("background", "");
+        }
+
+        // if (flvjs.isSupported() && 1 === 1 && !this.vediowindows[index].filename &&
+        //     0
+        // ) {
+        //     //解析H265时候用的...
+
+        //     let videoElement = document.getElementById(this.vediowindows[index].id);
+        //     flvPlayer = flvjs.createPlayer({
+        //         type,
+        //         hasAudio: hasAudio,
+        //         hasVideo: true,
+        //         url: url,
+        //         enableStashBuffer: true,
+        //         isLive: true,
+        //     });
+
+
+
+        //     flvPlayer.on(flvjs.Events.ERROR, (errType, errDetail) => {
+        //         if (
+        //             errType == "NetworkError" &&
+        //             (errDetail == "UnrecoverableEarlyEof" || errDetail == "Exception") &&
+        //             videoElement.currentTime == 0
+        //         )
+        //             canvasPlay();
+        //     });
+
+        //     try {
+        //         flvPlayer.attachMediaElement(videoElement);
+        //         flvPlayer.load();
+        //         flvPlayer.play();
+        //     } catch (err) {
+        //         //使用FLV播放失败，直接使用canvasPlay
+        //         canvasPlay();
+        //     }
+
+        //     if (videoElement != null)
+
+        //         videoElement.addEventListener("timeupdate", function (e) {
+        //             if (videoElement.currentTime > 0) {
+        //                 // 当前播放的进度
+        //                 $(this.ele + " .tv_video_item_" + (index + 1) + " .tv_video_item_box_video").css(
+        //                     "background",
+        //                     ""
+        //                 );
+        //             }
+        //             //视频打开瞬间关闭音频
+        //             if (videoElement.currentTime < 3 && that.isOpenSound == false) {
+        //                 flvPlayer.muted = true;
+        //             }
+        //         });
+        //     // $(".tv_video_item_sound_open").hide();
+        //     // $(".tv_video_item_sound_colse").show();
+        //     // this.vediowindows[index].flvPlayer = flvPlayer;
+        // } else {
+        canvasPlay();
+        // }
+
+        $(this.ele + " .tv_video_item_sound_open").hide();
+        $(this.ele + " .tv_video_item_sound_colse").show();
+        this.vediowindows[index].flvPlayer = flvPlayer;
+
+
+        let devicename = this.vediowindows[index].devicename || deviceno;
+
+        if (!channelName) {
+            $(this.ele + " .tv_video_item_" + (index + 1) + " .tv_video_item_box_ch").html(
+                devicename + "  " + this.vediowindows[index].channelName
+            );
+        } else
+            $(this.ele + " .tv_video_item_" + (index + 1) + " .tv_video_item_box_ch").html(
+                devicename + "  " + channelName
+            );
+
+        $(this.ele + " .tv_video_item_" + (index + 1) + " .tv_video_stop").show();
+
+        if( this.layero != undefined ) {
+            that.layero.find(this.ele + " .tv_video_item_" + (index + 1) + " .tv_video_item_box_video").css(
+                "background",
+                "url(image/5-160914192R0-50.gif) no-repeat center center"
+            );
+        } else {
+            $(this.ele + " .tv_video_item_" + (index + 1) + " .tv_video_item_box_video").css(
+                "background",
+                "url(image/5-160914192R0-50.gif) no-repeat center center"
+            );
+        }
+
+        $(this.ele + " .tv_video_item_" + (index + 1) + " .tv_video_vehicle_stop").show();
+
+        $(this.ele + " .tv_video_item_" + (index + 1) + " .tv_video_pause").show();
+
+        if (this.PlayStream == 1) { //主码流
+
+            $(this.ele + " .tv_video_item_" + (index + 1) + " .tv_video_item_box_hd_main").hide();
+            $(this.ele + " .tv_video_item_" + (index + 1) + " .tv_video_item_box_hd_main_sub").show();
+
+        } else {
+
+            $(this.ele + " .tv_video_item_" + (index + 1) + " .tv_video_item_box_hd_main").show();
+            $(this.ele + " .tv_video_item_" + (index + 1) + " .tv_video_item_box_hd_main_sub").hide();
+
+        }
+
+
+
+
+        this.vediowindows[index].isfree = false;
+        this.vediowindows[index].deviceno = deviceno;
+        this.vediowindows[index].channel = channel;
+        if (channelName) {
+            this.vediowindows[index].channelName = channelName;
+        }
+        this.vediowindows[index].serverip = ipserver;
+    },
+
+
+
+    /**
+     * 查看所有窗口是否被暂用，如果被暂用则直接返回，拼接播放URL
+     * @param serverip 服务器地址
+     * @param deviceno 设备编号
+     * @param channel 通道
+     * @param channelName 通道名称
+     * @param mainstream 子/主码流
+     * @param devicename devicename
+     * @param useLocalPlayStream 是否使用本地缓存值控制视频的 子/主码流
+     */
+    playVideo: function playVideo(serverip, deviceno, channel, channelName, mainstream, devicename, useLocalPlayStream = true) {
+
+        //$(this.ele + " .tv_video_item_box_hd_main").show();
+
+
+        // if (this.PlayStream == 1) { //主码流
+        //     $(this.ele + " .tv_video_item_box_hd_main").hide();
+        //     $(this.ele + " .tv_video_item_box_hd_main_sub").show();
+        // } else {
+        //     $(this.ele + " .tv_video_item_box_hd_main").show();
+        //     $(this.ele + " .tv_video_item_box_hd_main_sub").hide();
+        // }
+
+        let playStream = '';
+        if( useLocalPlayStream ) playStream = localStorage.getItem('PlayStream') ? localStorage.getItem('PlayStream') : 0;
+        else playStream = mainstream;
+
+        var url =
+            serverip + "/live?" + +new Date() + "_" + deviceno + "_" + channel + "_" + playStream;
+
+
+        if (
+            this.vediowindows.findIndex(
+                (item) =>
+                    item.isfree == false && item.deviceno == deviceno && item.channel == channel
+            ) > -1
+        ) {
+            return;
+        }
+        this._playVideo(url, deviceno, channel, channelName, null, null, devicename);
+        $(this.ele + " #stopAll").show();
+        $(this.ele + " .tv_video_play").hide();
+    },
+    /**
+     * 改变好花不大小
+     */
+    changeCanvas: function () {
+        $(this.ele + " .vedio_main canvas").each(function () {
+            this.height = $(this).parent().height();
+            this.width = $(this).parent().width();
+        });
+    },
+    /**
+     * 全屏
+     */
+    winFullscreen: function () {
+        const element = document.getElementById(this.ele.replace('#', ''));
+        if (screenfull.isEnabled && !this.isfull) {
+            screenfull.request(element);
+            this.isfull = true;
+        }
+        else {
+            screenfull.exit();
+            this.isfull = false;
+        }
+        this.changeCanvas();
+    },
+
+
+
+    /**
+     * 需要打开哪个窗口的声音
+     * @param {*} index 窗口索引
+     */
+    openAudio: function (index) {
+
+        let that = this;
+        if (that.vediowindows[index].isfree) return;
+        let flvPlayer = that.vediowindows[index].flvPlayer;
+        if (that.vediowindows[index].iscanvas) {
+            flvPlayer.openAudio(false);
+        } else {
+            flvPlayer.muted = true;
+        }
+
+    },
+
+    /**
+     * 需要打开哪个窗口的声音
+     * @param {*} index 窗口索引
+     */
+    closeAudio: function (index) {
+
+        let that = this;
+        if (that.vediowindows[index].isfree) return;
+        let flvPlayer = that.vediowindows[index].flvPlayer;
+        if (that.vediowindows[index].iscanvas) {
+            flvPlayer.openAudio(true);
+        } else {
+            flvPlayer.muted = false;
+        }
+    },
+    /**
+     * 需要打开哪个窗口的声音
+     * @param {*} index 窗口索引
+     */
+    stop: function (index) {
+
+        let that = this;
+
+        that.vediowindows[index].isfree = true;
+        that.vediowindows[index].totalTime = 0;
+        let {
+            flvPlayer,
+            url,
+            filename
+        } = that.vediowindows[index];
+
+        let port = url.split(/[/,:]/)[4];
+        if (port) {
+            that.httpsPorts.forEach((d) => {
+                if (d.port == port) {
+                    d.count -= 1;
+                }
+            });
+        }
+
+        if (flvPlayer) {
+            try {
+                flvPlayer.pause();
+                flvPlayer.unload();
+                flvPlayer.detachMediaElement();
+                flvPlayer.destroy();
+            } catch (err) { }
+        }
+
+        if (that.vediowindows[index].iscanvas == true) {
+            let box = $(that.ele + "videoElement" + (index + 1)).parent();
+            box.html("");
+            box.append(
+                '<video id="videoElement' + (index + 1) + '" autoplay muted="true"></video>'
+            );
+        }
+        that.vediowindows[index].iscanvas = false;
+        that.vediowindows[index].flvPlayer = null;
+
+        let _$ = $('.tv_video_stop' + "[data-index='" + (index + 1) + "']");
+        _$.parent().prev().css("background", "url(image/logo2.png) no-repeat center center");
+        _$.parent().find(".tv_video_item_box_ch").html("");
+        // 暂停按钮也取消掉
+        _$.next().hide();
+        _$.next().next().hide();
+        _$.hide();
+
+        //倍速回到一倍速
+
+        $(that.ele + " [data-index='" + (index + 1) + "']").filter('.tv_video_speed').hide();
+
+        if (that.isBackPlay) {
+            $(that.ele + " [data-index='" + (index + 1) + "']").filter('.tv_video_speed_1').show();
+        }
+
+
+
+        //这里主要处理告警录像列表播放时有选中状态，在这里取消
+
+        if (filename) {
+            $(".layui-table-cell:contains('" + filename + "')").parent().parent().removeClass('playing');
+        }
+    },
+
+    /**
+     * 单个暂停
+     * @param {} index 窗口索引
+     */
+    pause: function (index) {
+        let that = this;
+        let videoElement = that.vediowindows[index].flvPlayer;
+        videoElement.pause();
+    },
+    /**
+     * 单个播放
+     */
+    playsingle: function (index) {
+        let that = this;
+        let {
+            flvPlayer,
+            url
+        } = that.vediowindows[index];
+        let newUrl = "";
+        //当前是回放需要处理时间问题
+        if (url.indexOf("replay") >= 0) {
+            console.log(url);
+
+            let arr_url = url.split("_");
+            if (flvPlayer.OldTime) {
+                flvPlayer.OldTime += flvPlayer.currentTime;
+            } else flvPlayer.OldTime = flvPlayer.currentTime;
+            let newDate = parseInt(arr_url[3]) + flvPlayer.OldTime;
+
+            let year = arr_url[3].substring(0, 4);
+            let month = arr_url[3].substring(4, 6);
+            let day = arr_url[3].substring(6, 8);
+            let hour = arr_url[3].substring(8, 10);
+            let min = arr_url[3].substring(10, 12);
+            let s = arr_url[3].substring(12, 14);
+            let temp = +new Date(
+                year + "/" + month + "/" + day + " " + hour + ":" + min + ":" + s
+            );
+            temp += flvPlayer.OldTime * 1000;
+            arr_url[3] = formatDate(temp);
+            newUrl = arr_url.join("_").replace("replay?", "_bywasm_replay?");
+
+            flvPlayer.unload();
+        }
+        flvPlayer.play(newUrl);
+    },
+    /**
+     * 子码流
+     */
+    sub: function (index) {
+
+        let that = this;
+        index += 1;
+        let {
+            url,
+            deviceno,
+            channel,
+            isfree,
+            flvPlayer
+        } = that.vediowindows[index - 1];
+        if (isfree) return;
+
+        if (flvPlayer) {
+            try {
+                flvPlayer.pause();
+                flvPlayer.unload();
+                flvPlayer.detachMediaElement();
+                flvPlayer.destroy();
+            } catch (err) { }
+        }
+
+        let tempurl = url.split("_");
+        tempurl[tempurl.length - 1] = 0;
+        url = tempurl.join("_");
+
+        that.play(index - 1, url, deviceno, channel);
+
+    },
+    /**
+     * 主码流
+     */
+    main: function (index) {
+        let that = this;
+        index += 1;
+        let {
+            url,
+            deviceno,
+            channel,
+            isfree,
+            flvPlayer
+        } = that.vediowindows[index - 1];
+        if (isfree) return;
+        if (flvPlayer) {
+            try {
+                flvPlayer.pause();
+                flvPlayer.unload();
+                flvPlayer.detachMediaElement();
+                flvPlayer.destroy();
+            } catch (err) { }
+        }
+        let tempurl = url.split("_");
+        tempurl[tempurl.length - 1] = 1;
+        url = tempurl.join("_");
+
+
+        that.play(index - 1, url, deviceno, channel);
+    },
+    /**
+     * 回放倍数选择
+     * @param {*} index 
+     * @param {*} speed 
+     */
+    speed: function (index, speed) {
+
+        let that = this;
+        index += 1;
+        let {
+            url,
+            deviceno,
+            channel,
+            isfree,
+            flvPlayer,
+            channelName,
+            totalTime,
+        } = that.vediowindows[index - 1];
+
+
+        function formatDate(date) {
+            var date = new Date(date);
+            var YY = date.getFullYear() + "";
+            var MM =
+                (date.getMonth() + 1 < 10 ? "0" + (date.getMonth() + 1) : date.getMonth() + 1) + "";
+            var DD = date.getDate() < 10 ? "0" + date.getDate() : date.getDate();
+            var hh = (date.getHours() < 10 ? "0" + date.getHours() : date.getHours()) + "";
+            var mm = (date.getMinutes() < 10 ? "0" + date.getMinutes() : date.getMinutes()) + "";
+            var ss = date.getSeconds() < 10 ? "0" + date.getSeconds() : date.getSeconds();
+            return YY + MM + DD + hh + mm + ss;
+        }
+
+
+        //停止当前流。开启新的流
+        if (flvPlayer) {
+            try {
+                totalTime += parseInt(flvPlayer.currentTime) * speed;
+
+                flvPlayer.pause();
+                flvPlayer.unload();
+                flvPlayer.detachMediaElement();
+                flvPlayer.destroy();
+            } catch (err) { }
+        }
+
+        let cur_speed;
+
+        if (isfree) return;
+
+        switch (speed) {
+            case 1:
+                $(that.ele + " .tv_video_item_" + index + " .tv_video_speed").hide();
+                $(this).next().show();
+                cur_speed = 2;
+                break;
+            case 2:
+                $(that.ele + " .tv_video_item_" + index + " .tv_video_speed").hide();
+
+                $(this).next().show();
+                cur_speed = 4;
+                break;
+            case 4:
+                $(that.ele + " .tv_video_item_" + index + " .tv_video_speed").hide();
+                $($(that.ele + " .tv_video_item_" + index + " .tv_video_speed")[0]).show();
+                cur_speed = 1;
+                break;
+            default:
+                break;
+        }
+        let hasAudio = true;
+        let tempurl = url.split("_");
+        that.vediowindows[index - 1].totalTime = totalTime;
+        let year = tempurl[3].substring(0, 4);
+        let month = tempurl[3].substring(4, 6);
+        let day = tempurl[3].substring(6, 8);
+        let hour = tempurl[3].substring(8, 10);
+        let min = tempurl[3].substring(10, 12);
+        let s = tempurl[3].substring(12, 14);
+
+        let temp = +new Date(year + "/" + month + "/" + day + " " + hour + ":" + min + ":" + s);
+
+        temp += totalTime * 1000;
+
+        tempurl[3] = formatDate(temp);
+        if (cur_speed == 1) {
+            tempurl[0] = tempurl[0].replace("fastReplay", "replay");
+        } else {
+            tempurl[0] = tempurl[0].replace("replay", "fastReplay");
+            tempurl.push(cur_speed);
+            hasAudio = false;
+        }
+
+        url = tempurl.join("_");
+        url = url.replace('_bywasm_', ''); //控制权交给flv
+        that.play(index - 1, url, deviceno, channel, channelName, "", hasAudio, cur_speed);
+
+    },
+
+    changewin: function (wincount) {
+        this.initVideoWindow(wincount);
+        this.changeCanvas();
+    },
+    /**
+     * 初始化事件
+     */
+    resize: function () {
+
+        let that = this;
+        let ismax = $(that.ele + " .tv_video").data("ismaxwin");
+        if (ismax) {
+            $(that.ele + " .tv_video_item:visible").css("height", "");
+            let h = $(that.ele + " .tv_video").height() + "px";
+
+            $(that.ele + " .tv_video_item:visible").css("height", h);
+        } else {
+            that.initVideoWindow(this.windowsCount);
+            $(that.ele + " .tv_video").data("ismaxwin", false);
+        }
+        that.changeCanvas();
+
+    },
+    initEvent: function initEvent() {
+        let that = this;
+
+        //打开声音
+        $(that.ele + " .tv_video_item_sound_open").click(function () {
+            let index = $(this).data("index") - 1;
+            if (that.vediowindows[index].isfree) return;
+
+            let flvPlayer = that.vediowindows[index].flvPlayer;
+
+            if (that.vediowindows[index].iscanvas) {
+                flvPlayer.openAudio(false);
+            } else {
+                flvPlayer.muted = true;
+            }
+            $(this).prev().show();
+            $(this).hide();
+        });
+
+        //关闭声音
+        $(that.ele + " .tv_video_item_sound_colse").click(function () {
+            let index = $(this).data("index") - 1;
+            if (that.vediowindows[index].isfree) return;
+            let flvPlayer = that.vediowindows[index].flvPlayer;
+            if (that.vediowindows[index].iscanvas) {
+                flvPlayer.openAudio(true);
+            } else {
+                flvPlayer.muted = false;
+            }
+
+            $(this).next().show();
+            $(this).hide();
+        });
+
+        //单个停止
+        $(that.ele + " .tv_video_stop").click(function () {
+            let index = $(this).data("index") - 1;
+            console.log($(this).data);
+            that.stop(index);
+        });
+        // 关闭本车
+        $(that.ele + " .tv_video_vehicle_stop").click(function () {
+            let index = $(this).data("index") - 1;
+            let deviceno = that.vediowindows[index].deviceno;
+            let indexList = [];
+            that.vediowindows.filter((i, index) => {
+                if (i.deviceno === deviceno) {
+                    indexList.push(index);
+                }
+            });
+            indexList.forEach((i) => {
+                that.stop(i);
+            })
+        });
+
+        //单个暂停
+        $(that.ele + " .tv_video_pause").click(function () {
+
+            let index = $(this).data("index") - 1;
+            let videoElement = that.vediowindows[index].flvPlayer;
+            videoElement.pause();
+            $(this).next().show();
+            $(this).hide();
+
+        });
+
+        //单个播放
+        $(that.ele + " .tv_video_play").click(function () {
+            let index = $(this).data("index") - 1;
+
+            let {
+                flvPlayer,
+                url
+            } = that.vediowindows[index];
+            let newUrl = "";
+            //当前是回放需要处理时间问题
+            // if (url.indexOf("replay") >= 0) {
+            //     console.log(url);
+
+            //     let arr_url = url.split("_");
+            //     if (flvPlayer.OldTime) {
+            //         flvPlayer.OldTime += flvPlayer.currentTime;
+            //     } else flvPlayer.OldTime = flvPlayer.currentTime;
+            //     let newDate = parseInt(arr_url[3]) + flvPlayer.OldTime;
+
+            //     let year = arr_url[3].substring(0, 4);
+            //     let month = arr_url[3].substring(4, 6);
+            //     let day = arr_url[3].substring(6, 8);
+            //     let hour = arr_url[3].substring(8, 10);
+            //     let min = arr_url[3].substring(10, 12);
+            //     let s = arr_url[3].substring(12, 14);
+            //     let temp = +new Date(
+            //         year + "/" + month + "/" + day + " " + hour + ":" + min + ":" + s
+            //     );
+            //     temp += flvPlayer.OldTime * 1000;
+            //     arr_url[3] = formatDate(temp);
+            //     newUrl = arr_url.join("_").replace("replay?", "_bywasm_replay?");
+            //     that.log.logInfo(`Change Url ${newUrl}`);
+            //     flvPlayer.unload();
+            // }
+
+            flvPlayer.resumePlaying();
+
+            //flvPlayer.play(newUrl);
+            $(this).prevAll().show();
+            $(this).hide();
+        });
+
+        // 单个全屏哟
+        $(that.ele + " .tv_video_item_box_full").click(function () {
+            let ismax = $(that.ele + " .tv_video").data("ismaxwin");
+            let h = $(that.ele + " .tv_video").height() + "px";
+            if (!ismax) {
+                // $(that.ele + " .tv_video").css('display', 'inline');
+                // $(that.ele + " .tv_video_item").css('display', 'none');
+
+                $(that.ele + " .tv_video").css("display", "inline");
+                $(that.ele + " .tv_video_item").css("height", "");
+                $(that.ele + " .tv_video_item").css("width", "");
+                $(that.ele + " .tv_video_item").css("float", "");
+                $(that.ele + " .tv_video_item").css("display", "none");
+                $(that.ele + " .tv_video_item_4").css("clear", "");
+
+                // $(that.ele + " .tv_video_item_1").css('width', '100%');
+                // // $(that.ele + " .tv_video_item_1").css('float', '');
+                // $('.tv_video_item_1').css('display', '');
+                // $(that.ele + " .tv_video_item_1").css('height', _h);
+                // //$(that.ele + " .tv_video").css('display', 'inline');
+
+                $(this).parent().parent().parent().css("height", h);
+                $(this).parent().parent().parent().css("width", "100%");
+                //$(this).parent().parent().parent().css('float', '');
+                $(this).parent().parent().parent().css("display", "");
+                $(that.ele + " .tv_video").data("ismaxwin", true);
+            } else {
+                that.initVideoWindow(that.windowsCount);
+                $(that.ele + " .tv_video").data("ismaxwin", false);
+            }
+            that.changeCanvas();
+        });
+
+        //主码流
+        $(that.ele + " .tv_video_item_box_hd_main_sub").click(function () {
+            const index = $(this).data("index");
+            let {
+                url,
+                deviceno,
+                channel,
+                isfree,
+                flvPlayer
+            } = that.vediowindows[index - 1];
+            if (isfree) return;
+
+            if (flvPlayer) {
+                try {
+                    flvPlayer.pause();
+                    flvPlayer.unload();
+                    flvPlayer.detachMediaElement();
+                    flvPlayer.destroy();
+                } catch (err) { }
+            }
+
+            let tempurl = url.split("_");
+            tempurl[tempurl.length - 1] = 0;
+            url = tempurl.join("_");
+
+
+            that.play(index - 1, url, deviceno, channel);
+            $(this).hide();
+
+            $(that.ele + " .tv_video_item_" + index + " .tv_video_item_box_hd_main").show();
+        });
+
+        //子码流
+        $(that.ele + " .tv_video_item_box_hd_main").click(function () {
+            const index = $(this).data("index");
+            let {
+                url,
+                deviceno,
+                channel,
+                isfree,
+                flvPlayer
+            } = that.vediowindows[index - 1];
+            if (isfree) return;
+            if (flvPlayer) {
+                try {
+                    flvPlayer.pause();
+                    flvPlayer.unload();
+                    flvPlayer.detachMediaElement();
+                    flvPlayer.destroy();
+                } catch (err) { }
+            }
+            let tempurl = url.split("_");
+            tempurl[tempurl.length - 1] = 1;
+            url = tempurl.join("_");
+
+
+            that.play(index - 1, url, deviceno, channel);
+            $(this).hide();
+
+            $(that.ele + " .tv_video_item_" + index + " .tv_video_item_box_hd_main_sub").show();
+        });
+
+        function formatDate(date) {
+            var date = new Date(date);
+            var YY = date.getFullYear() + "";
+            var MM =
+                (date.getMonth() + 1 < 10 ? "0" + (date.getMonth() + 1) : date.getMonth() + 1) + "";
+            var DD = date.getDate() < 10 ? "0" + date.getDate() : date.getDate();
+            var hh = (date.getHours() < 10 ? "0" + date.getHours() : date.getHours()) + "";
+            var mm = (date.getMinutes() < 10 ? "0" + date.getMinutes() : date.getMinutes()) + "";
+            var ss = date.getSeconds() < 10 ? "0" + date.getSeconds() : date.getSeconds();
+            return YY + MM + DD + hh + mm + ss;
+        }
+        //回放时倍速选择
+        $(that.ele + " .tv_video_speed").click(function () {
+            const speed = $(this).data("speed");
+            const index = $(this).data("index");
+
+            let {
+                url,
+                deviceno,
+                channel,
+                isfree,
+                flvPlayer,
+                channelName,
+                totalTime,
+            } = that.vediowindows[index - 1];
+
+            //totalTime = that.getcurrentTimeForCH1(index - 1);
+            console.log('totalTime :' + totalTime);
+
+            //停止当前流。开启新的流
+            if (flvPlayer) {
+                try {
+                    totalTime += parseInt(flvPlayer.currentTime);
+                    flvPlayer.pause();
+                    flvPlayer.unload();
+                    flvPlayer.detachMediaElement();
+                    flvPlayer.destroy();
+                } catch (err) { }
+            }
+            console.log('totalTime :' + totalTime);
+            let cur_speed;
+
+            if (isfree) return;
+
+            switch (speed) {
+                case 1:
+                    $(that.ele + " .tv_video_item_" + index + " .tv_video_speed").hide();
+                    $(this).next().show();
+                    cur_speed = 2;
+                    break;
+                case 2:
+                    $(that.ele + " .tv_video_item_" + index + " .tv_video_speed").hide();
+
+                    $(this).next().show();
+                    cur_speed = 4;
+                    break;
+                case 4:
+                    $(that.ele + " .tv_video_item_" + index + " .tv_video_speed").hide();
+                    //$($(that.ele + " .tv_video_item_" + index + " .tv_video_speed")[0]).show();
+                    $(this).next().show();
+                    cur_speed = 8;
+                    break;
+                case 8:
+                    $(that.ele + " .tv_video_item_" + index + " .tv_video_speed").hide();
+                    //$($(that.ele + " .tv_video_item_" + index + " .tv_video_speed")[0]).show();
+                    $(this).next().show();
+                    cur_speed = 16;
+                    break;
+                case 16:
+                    $(that.ele + " .tv_video_item_" + index + " .tv_video_speed").hide();
+                    $($(that.ele + " .tv_video_item_" + index + " .tv_video_speed")[0]).show();
+                    //$(this).next().show();
+                    cur_speed = 1;
+                    break;
+                default:
+                    break;
+            }
+            let hasAudio = true;
+            let tempurl = url.split("_");
+            that.vediowindows[index - 1].totalTime = totalTime;
+            let year = tempurl[3].substring(0, 4);
+            let month = tempurl[3].substring(4, 6);
+            let day = tempurl[3].substring(6, 8);
+            let hour = tempurl[3].substring(8, 10);
+            let min = tempurl[3].substring(10, 12);
+            let s = tempurl[3].substring(12, 14);
+
+            let temp = +new Date(year + "/" + month + "/" + day + " " + hour + ":" + min + ":" + s);
+
+            temp += totalTime * 1000;
+
+            tempurl[3] = formatDate(temp);
+            if (cur_speed == 1) {
+                tempurl[0] = tempurl[0].replace("fastReplay", "replay");
+            } else {
+                tempurl[0] = tempurl[0].replace("replay", "fastReplay");
+                tempurl.push(cur_speed);
+                hasAudio = false;
+            }
+
+            url = tempurl.join("_");
+            url = url.replace('_bywasm_', ''); //控制权交给flv
+
+            console.log(url);
+
+
+            that.play(index - 1, url, deviceno, channel, channelName, "", hasAudio, cur_speed);
+        });
+
+        //切换窗口数量
+        $(that.ele + " .wincount").click(function () {
+
+            if ($(this).hasClass('tv_control_font_hover') == false) {
+                return;
+            }
+
+
+            let count = $(this).data("wincount");
+            $(that.ele + " .tv_video").data("wincount", count);
+            that.initVideoWindow(count);
+            that.changeCanvas();
+        });
+
+        //全部停止按钮
+        $(that.ele + " #stopAll").click(function () {
+
+            if ($(this).hasClass('tv_control_font_hover') == false) {
+                return;
+            }
+
+            that.stopAllVideo();
+
+            //倍速回到一倍速
+
+            $('.tv_video_speed').hide();
+            if (that.isBackPlay) {
+                $('.tv_video_speed_1').show();
+            }
+
+            //这里主要处理告警录像列表播放时有选中状态，在这里取消
+            $('.playing').removeClass('playing');
+        });
+
+        // 全部暂停按钮
+        $(that.ele + " #pauseAll").click(function () {
+            that.pauseAll();
+        });
+
+
+        //双击全屏
+        var touchtime = 0;
+        $(that.ele + ' .tv_video_item_box_video').on("click", function () {
+            if (touchtime == 0) {
+                // set first click
+                touchtime = new Date().getTime();
+            } else {
+                // compare first click to this click and see if they occurred within double click threshold
+                if (((new Date().getTime()) - touchtime) < 500) {
+                    // double click occurred
+                    $(this).parent().find('.tv_video_item_box_full').click();
+                    touchtime = 0;
+                } else {
+                    // not a double click so set as a new first click
+                    touchtime = new Date().getTime();
+                }
+            }
+        });
+
+        //双击全屏
+        // $(that.ele + ' .tv_video_item_box_video').dblclick(function() {
+
+        //     $(this).parent().find('.tv_video_item_box_full').click();
+
+        // });
+
+        //实时/流畅
+        $(that.ele + ' .playmode').click(function () {
+            if ($(this).hasClass('tv_control_font_hover') == false) {
+                return;
+            }
+
+            if ($(this).hasClass('real')) {
+                $(this).removeClass('real').html('&#xe672;').attr('title', sessionStorage.getItem('SMOOTHFIRST'))
+                that.mBufferTimeMs = 2000;
+                return;
+            }
+            that.mBufferTimeMs = 0;
+            $(this).addClass('real').html('&#xe6ce;').attr('title', sessionStorage.getItem('REALFIRST'))
+        })
+
+        //全部播放按钮
+        $(that.ele + " #playAll").click(function () {
+            if ($(this).hasClass('tv_control_font_hover') == false) {
+                return;
+            }
+
+            $(that.ele + " .tv_video_play").hide();
+            for (let index = 0; index < that.windowsCount; index++) {
+                if (!that.vediowindows[index].flvPlayer) return;
+                if (that.vediowindows[index].channel != -1) {
+                    $(that.ele + " .tv_video_item_" + (index + 1) + " .tv_video_pause").show();
+                    $(that.ele + " .tv_video_item_" + (index + 1) + " .tv_video_stop").show();
+                    $(that.ele + " .tv_video_item_" + (index + 1) + " .tv_video_vehicle_stop").show();
+                }
+                that.vediowindows[index].isfree = true;
+                that.vediowindows[index].flvPlayer.resumePlaying();
+                // let videoElement = document.getElementById(that.vediowindows[index].id);
+                // videoElement.play();
+            }
+            $(that.ele + " #stopAll").show();
+        });
+
+        //全屏
+        $(that.ele + " #winFullscreen").click(function () {
+            that.winFullscreen();
+        });
+
+
+        //截屏
+        $(that.ele + " .tv_video_item_camera").click(function () {
+
+
+            let canvas = $(this).parent().prev().find('canvas');
+            if (canvas.length > 0) {
+                let img = $.canvasToImage(canvas[0]);
+                that.cameraData = img.src;
+                sessionStorage.setItem('cameraData', img.src)
+                //$.imageDownLoad(img);
+                layer.open({
+                    type: 2,
+                    title: sessionStorage.getItem('PICTUREPROCESSING') || 'Picture processing',
+                    fixed: false, //不固定
+                    maxmin: true,
+                    area: ['1100px', '700px'],
+                    content: 'howen_ps.html?v=1.8.6'
+                });
+            }
+
+
+        });
+
+
+        $(window).resize(function () {
+
+
+            setTimeout(function () {
+                let ismax = $(that.ele + " .tv_video").data("ismaxwin");
+                if (ismax) {
+                    $(that.ele + " .tv_video_item:visible").css("height", "");
+                    let h = $(that.ele + " .tv_video").height() + "px";
+
+                    $(that.ele + " .tv_video_item:visible").css("height", h);
+                } else {
+                    that.initVideoWindow(this.windowsCount);
+                    $(that.ele + " .tv_video").data("ismaxwin", false);
+                }
+                that.changeCanvas();
+            }, 200)
+
+
+
+        });
+
+        //TODO v.7 PZT 改造
+
+
+        $(document).on('click', '.tv_video_item', function () {
+            let index = $(this).find('.tv_video_item_box').attr('data-index');
+            let {
+                isfree,
+                channel,
+                deviceno
+            } = that.vediowindows[index];
+            if (isfree) return;
+            $('.tv_video_item').removeClass('tv_video_item_selected')
+            $(this).addClass('tv_video_item_selected');
+            that.selectedChange && that.selectedChange(deviceno, channel);
+            that.changeCanvas();
+        })
+
+
+        //TODO V1.7  这里检测60s不操作时， 主动关闭视频
+
+        let currtentTime = new Date().getTime(),
+            lastTime = new Date().getTime(),
+            diff = (localStorage.getItem('seting_closevideovalue') ? parseInt(localStorage.getItem('seting_closevideovalue')) : 1000) * 1000;
+        $(document).on('mouseover', function () {
+            lastTime = new Date().getTime();
+        });
+        let timer = setInterval(function () {
+            currentTime = new Date().getTime();
+            if (currentTime - lastTime > diff) {
+                that.stopAllVideo();
+                lastTime = new Date().getTime();
+                //clearInterval(timer);
+            }
+        }, 1);
+
+
+        //TODO V1.7 这里是右键菜单
+
+
+        function videoContextClick(treeid, key, $selector) {
+            let v = $selector,
+                ele;
+
+            let i = v.attr('data-index');
+            // switch (key) {
+            //     case "First":
+            //         ele = $(that.ele + ' .playmode');
+            //         if (ele.hasClass('real'))
+            //             return;
+            //         ele.click();
+            //         break;
+            //     case "Smooth":
+            //         ele = $(that.ele + ' .playmode');
+            //         if (!ele.hasClass('real'))
+            //             return;
+            //         ele.click();
+            //         break;
+            //     default:
+            //         break;
+            // }
+            //判断是否空闲状态
+            if (that.vediowindows[i].isfree && key != 'CLOSEALL')
+                return;
+            switch (key) {
+                // 关闭所有车辆视频
+                case "CLOSEALL":
+                    that.stopAllVideo();
+                    return;
+                // 关闭
+                case "CLOSE":
+                    ele = $(that.ele + ' .tv_video_stop:eq(' + i + ')');
+                    if (ele.css('display') != 'none')
+                        ele.click();
+                    return;
+                // 关闭本车
+                case "CLOSE_THE_CAR_VIDEO":
+
+                    ele = $(that.ele + ' .tv_video_vehicle_stop:eq(' + i + ')');
+                    if (ele.css('display') != 'none')
+                        ele.click();
+                    return;
+
+                case "MianStream":
+
+                    ele = $(that.ele + ' .tv_video_item_box_hd_main:eq(' + i + ')');
+                    if (ele.css('display') != 'none')
+                        ele.click();
+                    return;
+                case "SubStream":
+
+                    ele = $(that.ele + ' .tv_video_item_box_hd_main_sub:eq(' + i + ')');
+                    if (ele.css('display') != 'none')
+                        ele.click();
+                    break;
+                case "SoundOpen":
+
+                    ele = $(that.ele + ' .tv_video_item_sound_colse:eq(' + i + ')');
+                    if (ele.css('display') != 'none')
+                        ele.click();
+                    break;
+                case "SoundClose":
+
+                    ele = $(that.ele + ' .tv_video_item_sound_open:eq(' + i + ')');
+                    if (ele.css('display') != 'none')
+                        ele.click();
+                    break;
+                case "Full":
+
+                    ele = $(that.ele + ' .tv_video_item_box_full:eq(' + i + ')');
+                    if (ele.css('display') != 'none')
+                        ele.click();
+                    break;
+                case "Camera":
+
+                    ele = $(that.ele + ' .tv_video_item_camera:eq(' + i + ')');
+                    if (ele.css('display') != 'none')
+                        ele.click();
+                    break;
+
+            }
+
+        };
+
+        typeof (context) != 'undefined' && context.init({
+            preventDoubleContext: false
+        });
+
+        typeof (context) != 'undefined' && context.attach('.tv_video_item_box_video', [
+
+            {
+                text: sessionStorage.getItem('CLOSE'),
+                action: function (e) {
+                    videoContextClick(null, 'CLOSE', this.currentContextSelector);
+
+                }
+            },
+
+            {
+                text: sessionStorage.getItem('CLOSEALLVIDEO'),
+                action: function (e) {
+                    videoContextClick(null, 'CLOSEALL', this.currentContextSelector);
+
+                }
+            },
+            {
+                text: sessionStorage.getItem('CLOSE_THE_CAR_VIDEO') || '关闭本车视频',
+                action: function (e) {
+                    videoContextClick(null, 'CLOSE_THE_CAR_VIDEO', this.currentContextSelector);
+
+                }
+            },
+            {
+                text: sessionStorage.getItem('MAINSTREAM'),
+                action: function (e) {
+                    videoContextClick(null, 'MianStream', this.currentContextSelector);
+
+                }
+            },
+            {
+                text: sessionStorage.getItem('SUBSTREAM'),
+                action: function (e) {
+                    videoContextClick(null, 'SubStream', this.currentContextSelector);
+
+                }
+            },
+            {
+                text: sessionStorage.getItem('SOUND_OPEN'),
+                action: function (e) {
+                    videoContextClick(null, 'SoundOpen', this.currentContextSelector);
+
+                }
+            },
+            {
+                text: sessionStorage.getItem('SOUND_COLSE'),
+                action: function (e) {
+                    videoContextClick(null, 'SoundClose', this.currentContextSelector);
+
+                }
+            },
+            {
+                text: sessionStorage.getItem('SCREENSHOT'),
+                action: function (e) {
+                    videoContextClick(null, 'Camera', this.currentContextSelector);
+
+                }
+            },
+            {
+                text: sessionStorage.getItem('FULLSCREEN'),
+                action: function (e) {
+                    videoContextClick(null, 'Full', this.currentContextSelector);
+
+                }
+            },
+
+
+        ]);
+
+
+
+
+    },
+};
