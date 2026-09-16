@@ -121,6 +121,8 @@ def _layout_context(*, active: str, **extra):
         "brand_name": brand.brand_name(),
         "brand_tagline": brand.brand_tagline(),
         "brand_subtitle": brand.brand_subtitle(),
+        "brand_logo": brand.logo_file(),
+        "brand_mark": brand.mark_file(),
         "app_build": APP_BUILD,
         "username": session.get("username", ""),
         "ui_poll_ms": max(250, int(os.environ.get("DHL_UI_POLL_MS", "5000") or "5000")),
@@ -167,6 +169,8 @@ def login():
         hero_exists=True,
         brand_name=brand.brand_name(),
         brand_tagline=brand.brand_tagline(),
+        brand_logo=brand.logo_file(),
+        brand_mark=brand.mark_file(),
     )
 
 

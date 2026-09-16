@@ -43,9 +43,15 @@ def vss_fleet_contains() -> str:
     return _env("FLEET_VSS_CONTAINS") or brand_name()
 
 
-def accent_color() -> str:
-    return _env("FLEET_ACCENT_COLOR") or "#D40511"
+def logo_file() -> str:
+    """Full logo for light surfaces (the login card). Served from ``assets/``."""
+    return _env("FLEET_LOGO_FILE") or "alliad_logo.svg"
 
 
-def accent_secondary() -> str:
-    return _env("FLEET_ACCENT_SECONDARY") or "#FFCC00"
+def mark_file() -> str:
+    """Logo mark for dark surfaces — the navy wordmark would vanish on the nav bar."""
+    return _env("FLEET_MARK_FILE") or "alliad_mark.svg"
+
+
+# The colour palette lives in assets/flask-theme.css (--nav-bg, --accent, and
+# friends) and in components.BRAND_PRIMARY / BRAND_SECONDARY for charts.

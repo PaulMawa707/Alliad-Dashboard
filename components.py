@@ -13,9 +13,10 @@ import plotly.graph_objects as go
 from data import RT_VIDEO_LOST_CHANNEL_MAX, parse_channels
 
 # Chart palette. The DHL_* names are kept because every view imports them; the
-# values are Alliad's: brand blue for headings, alert red/amber for bad states.
-BRAND_PRIMARY = "#0F4C81"
-BRAND_SECONDARY = "#F4A81D"
+# values are Alliad's own (navy wordmark, green mark on alliad.com), with alert
+# red/amber reserved for bad states.
+BRAND_PRIMARY = "#0C112B"
+BRAND_SECONDARY = "#00CD8C"
 # Driver-behaviour KPI accents (kept in step with behaviour.BEHAVIOUR_COLORS).
 BEHAVIOUR_COLOR_OVERSPEED = "#DC2626"
 BEHAVIOUR_COLOR_ACCEL = "#F59E0B"
@@ -30,7 +31,9 @@ CHART_ORANGE = "#F97316"
 CHART_PURPLE = "#8B5CF6"
 CHART_CYAN = "#06B6D4"
 CHART_SLATE = "#64748B"
-COLORWAY = [BRAND_PRIMARY, DHL_RED, CHART_GREEN, BRAND_SECONDARY, CHART_PURPLE, CHART_ORANGE, CHART_CYAN, CHART_SLATE]
+# Brand green sits where the generic green used to, so a series never lands next
+# to a near-identical colour.
+COLORWAY = [BRAND_PRIMARY, DHL_RED, BRAND_SECONDARY, CHART_BLUE, CHART_PURPLE, CHART_ORANGE, CHART_CYAN, CHART_SLATE]
 
 DEFAULT_LAYOUT = dict(
     margin=dict(l=48, r=32, t=72, b=48),

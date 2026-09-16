@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>{% block title %}{{ title }} · {{ brand_name }} {{ brand_tagline }}{% endblock %}</title>
   {% if request.headers.get('X-Requested-With') != 'fetch' %}
-  <link rel="icon" type="image/png" href="{{ url_for('static', filename='controltech_logo.png') }}">
+  <link rel="icon" href="{{ url_for('static', filename=brand_mark) }}">
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">

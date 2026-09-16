@@ -1,22 +1,23 @@
 :root {
-  /* Alliad palette. Variable names are historical; values are the brand's. */
-  --dhl-red: #0F4C81;
-  --dhl-yellow: #F4A81D;
-  --dhl-red-dark: #0B3A63;
-  --nav-bg: #0F4C81;
-  --nav-bg-dark: #0B3A63;
+  /* Alliad palette, taken from the logo on alliad.com: deep navy wordmark with a
+     green mark. Variable names are historical; the values are the brand's. */
+  --dhl-red: #0C112B;
+  --dhl-yellow: #00CD8C;
+  --dhl-red-dark: #070B1C;
+  --nav-bg: #0C112B;
+  --nav-bg-dark: #070B1C;
   --nav-text: #ffffff;
   --nav-muted: rgba(255, 255, 255, 0.78);
-  --accent: #F4A81D;
-  --page-title: #0F4C81;
+  --accent: #00CD8C;
+  --page-title: #0C112B;
   --bg: #F4F5F7;
   --surface: #ffffff;
   --text: #1F1F1F;
   --text-muted: #6B7280;
   --border: #E5E7EB;
-  --green: #2E8B57;
-  --table-head: #1E3A5F;
-  --footer-strip: #0B3A63;
+  --green: #00A870;
+  --table-head: #1A2142;
+  --footer-strip: #070B1C;
 }
 
 *, *::before, *::after { box-sizing: border-box; }
@@ -933,7 +934,7 @@ html, body {
 }
 
 .data-table th.sortable-th:hover {
-  background: #1e3a5f;
+  background: #26305C;
 }
 
 .data-table th.sortable-th::after {
