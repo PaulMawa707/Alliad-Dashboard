@@ -57,7 +57,16 @@ $env:VERCEL_TOKEN = "<token from https://vercel.com/account/tokens>"
 python scripts/setup_vercel_project.py --name alliad-fleet --team data-science-geeks --repo PaulMawa707/Alliad-Dashboard
 ```
 
-That creates the project, links it to GitHub so pushes to `main` deploy, writes `.vercel/project.json`, and pushes every variable listed in `scripts/push_env_vercel.py` to production. To refresh only the environment later:
+That creates the project, writes `.vercel/project.json`, and pushes every variable listed in `scripts/push_env_vercel.py` to production. Deploy with:
+
+```powershell
+python scripts/deploy_vercel.py            # uploads the git-tracked tree, waits for the build
+python scripts/vercel_logs.py              # build logs for the latest production deployment
+```
+
+`--repo` only works once the Vercel account has a GitHub login connection; until then the API file upload above is the deployment path. After connecting GitHub in the Vercel dashboard, pushes to `main` deploy on their own and `deploy_vercel.py` becomes a manual fallback.
+
+To refresh only the environment later:
 
 ```powershell
 python scripts/push_env_vercel.py --dry-run   # review
