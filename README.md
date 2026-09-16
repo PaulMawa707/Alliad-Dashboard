@@ -48,6 +48,24 @@ Pages:
 
    Open **http://127.0.0.1:8060/login**
 
+## Deployment
+
+The repository is [PaulMawa707/Alliad-Dashboard](https://github.com/PaulMawa707/Alliad-Dashboard), deployed on Vercel under the `data-science-geeks` team. The Vercel CLI is blocked by Application Control policy on the build machine, so project setup goes through the REST API:
+
+```powershell
+$env:VERCEL_TOKEN = "<token from https://vercel.com/account/tokens>"
+python scripts/setup_vercel_project.py --name alliad-fleet --team data-science-geeks --repo PaulMawa707/Alliad-Dashboard
+```
+
+That creates the project, links it to GitHub so pushes to `main` deploy, writes `.vercel/project.json`, and pushes every variable listed in `scripts/push_env_vercel.py` to production. To refresh only the environment later:
+
+```powershell
+python scripts/push_env_vercel.py --dry-run   # review
+python scripts/push_env_vercel.py             # apply
+```
+
+`vercel.json` runs `/api/cron/realtime` every 15 minutes, and `.github/workflows/realtime-cron.yml` pings the same endpoint as a backstop. Both need `CRON_SECRET` to match. There is deliberately no VSS token-refresh job here — the DHL deployment owns that schedule and both dashboards read the same `vss_tokens` row.
+
 ## Data sources
 
 | Source | Auth | What the dashboard reads |
