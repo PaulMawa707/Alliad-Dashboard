@@ -3,8 +3,10 @@
 from __future__ import annotations
 
 from html import escape
+import logging
 import os
 import re
+import traceback
 from typing import Any
 from urllib.parse import quote, urlencode
 
@@ -12,6 +14,7 @@ import pandas as pd
 
 import brand
 import components as C
+import operation_log
 from behaviour import (
     BEHAVIOURS,
     HARSH_ACCELERATION,
@@ -70,6 +73,30 @@ from web.alerts import (
 )
 from web.charts import figure_html
 from web.prewarm import realtime_auto_refresh_seconds
+
+log = logging.getLogger("views")
+
+
+def safe_figure_html(builder, *, div_id: str, label: str) -> str:
+    """Render one chart; a chart that raises must not take the whole page down.
+
+    Serverless stderr is hard to read after the fact, so the failure is also
+    written to the operation log where the Logs page can show it.
+    """
+    try:
+        return figure_html(builder(), div_id=div_id)
+    except Exception as exc:  # noqa: BLE001
+        log.exception("chart %s failed to render", label)
+        operation_log.log_event(
+            "ui",
+            f"chart/{label}",
+            "error",
+            f"{type(exc).__name__}: {exc}",
+            detail={"traceback": traceback.format_exc()[-2000:]},
+        )
+        return figure_html(
+            C.loading_fig(f"Chart unavailable — {type(exc).__name__}: {exc}"), div_id=div_id
+        )
 
 DHL_RED = C.DHL_RED
 DHL_YELLOW = C.DHL_YELLOW
@@ -1689,7 +1716,9 @@ def behaviour_context(
         "source": lambda: C.behaviour_source_bar(filtered, window_label=window_label),
         "map": lambda: C.behaviour_map(filtered, window_label=window_label),
     }
-    chart_html = figure_html(chart_builders[chart](), div_id=f"behaviour-chart-{chart}")
+    chart_html = safe_figure_html(
+        chart_builders[chart], div_id=f"behaviour-chart-{chart}", label=f"behaviour/{chart}"
+    )
 
     table_df = filtered.copy()
     if "Start" in table_df.columns:
