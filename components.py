@@ -60,6 +60,16 @@ _AXIS_LAYOUT = dict(
 )
 
 
+def _map_style_layout(style: str = "open-street-map") -> dict:
+    """Basemap layout key for the installed Plotly.
+
+    Plotly replaced the Mapbox traces with MapLibre ones (``scatter_map``) and has
+    since dropped ``layout.mapbox`` entirely, so the removed key must not be sent
+    at all — not even as ``None``.
+    """
+    return {"map_style": style} if hasattr(px, "scatter_map") else {"mapbox_style": style}
+
+
 def _chart_title(text: str) -> dict:
     return dict(
         text=f"<b>{text}</b>",
@@ -541,10 +551,9 @@ def mix_positions_map(pos_df: pd.DataFrame) -> go.Figure:
     layout.update(_AXIS_LAYOUT)
     layout.update(
         title=_chart_title("MiX asset locations (tacho speed)"),
-        map_style="open-street-map" if hasattr(px, "scatter_map") else None,
-        mapbox_style="open-street-map" if not hasattr(px, "scatter_map") else None,
         height=600,
         margin=dict(l=0, r=0, t=64, b=0),
+        **_map_style_layout(),
     )
     fig.update_layout(**layout)
     return fig
@@ -579,10 +588,9 @@ def alarm_map(alarms_df: pd.DataFrame) -> go.Figure:
     layout.update(_AXIS_LAYOUT)
     layout.update(
         title=_chart_title("Alarm locations (last 24h)"),
-        map_style="open-street-map" if hasattr(px, "scatter_map") else None,
-        mapbox_style="open-street-map" if not hasattr(px, "scatter_map") else None,
         height=600,
         margin=dict(l=0, r=0, t=64, b=0),
+        **_map_style_layout(),
     )
     fig.update_layout(**layout)
     return fig
@@ -737,10 +745,9 @@ def behaviour_map(df: pd.DataFrame, *, window_label: str) -> go.Figure:
     layout = dict(DEFAULT_LAYOUT)
     layout.update(
         title=_chart_title(f"Where violations happened ({window_label})"),
-        map_style="open-street-map" if hasattr(px, "scatter_map") else None,
-        mapbox_style="open-street-map" if not hasattr(px, "scatter_map") else None,
         height=560,
         margin=dict(l=0, r=0, t=64, b=0),
+        **_map_style_layout(),
     )
     fig.update_layout(**layout)
     return fig
