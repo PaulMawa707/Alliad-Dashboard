@@ -93,14 +93,11 @@ def _masked(key: str, value: str) -> str:
     return value
 
 
-def main() -> int:
-    args = [a for a in sys.argv[1:] if not a.startswith("-")]
-    dry_run = "--dry-run" in sys.argv
-
+def push(keys: tuple[str, ...] | None = None, *, dry_run: bool = False) -> int:
     # ``.env`` wins over whatever the shell already exported, so a stale variable
     # from an earlier probe cannot leak into the deployment.
     load_env_file(ROOT / ".env", overwrite=True)
-    wanted = tuple(args) if args else KEYS
+    wanted = keys or KEYS
 
     pushed: list[str] = []
     skipped: list[str] = []
@@ -120,6 +117,12 @@ def main() -> int:
     if not dry_run and "CRON_SECRET" in skipped:
         print("WARNING: CRON_SECRET is unset — /api/cron/realtime will reject scheduled pings.")
     return 0
+
+
+def main() -> int:
+    """Command-line entry point. Importers should call :func:`push` instead."""
+    keys = tuple(a for a in sys.argv[1:] if not a.startswith("-"))
+    return push(keys or None, dry_run="--dry-run" in sys.argv)
 
 
 if __name__ == "__main__":

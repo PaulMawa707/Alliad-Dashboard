@@ -132,7 +132,7 @@ def main() -> int:
 
     import push_env_vercel  # noqa: PLC0415  — imported late so the ids above are set
 
-    return push_env_vercel.main()
+    return push_env_vercel.push()
 
 
 if __name__ == "__main__":
