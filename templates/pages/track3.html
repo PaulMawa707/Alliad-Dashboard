@@ -18,7 +18,7 @@
   {{ kpi_row(kpis) }}
 
   {% if charts %}
-    <div class="chart-grid">
+    <div class="chart-grid chart-grid-center">
       {% for chart in charts %}
         <div class="chart-card">{{ chart|safe }}</div>
       {% endfor %}
